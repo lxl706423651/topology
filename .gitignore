@@ -1,0 +1,9 @@
+# Ignore everything by default.
+*
+
+# Track only root-level Python and shell scripts.
+!/*.py
+!/*.sh
+
+# Track this ignore policy.
+!/.gitignore

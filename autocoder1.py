@@ -1,7 +1,6 @@
 from seedemu.layers import Base, Routing, Ebgp, Ibgp, Ospf, PeerRelationship
 from seedemu.compiler import Docker, Platform
 from seedemu.core import Emulator
-from seedemu.utilities import Makers
 import os
 import sys
 import networkx as nx
@@ -18,14 +17,66 @@ import psutil
 from datetime import datetime
 from ipaddress import IPv4Address,IPv4Network
 import random
+from seedemu.services import TrafficService, TrafficServiceType
+from seedemu.layers import EtcHosts
 with open("assignment.pkl", "rb") as f:
     assignment = pickle.load(f)
 node_prefix={}
 for key,value in assignment.items():
     node_prefix[value['asn']]=value['ipv4']
 
+def add_traffic(base, emu, stubAS, assignment_temp, num=10):
+    etc_hosts = EtcHosts()
+    traffic_service = TrafficService()
+    for i in range(num):
+        asnum1=assignment_temp[stubAS[3*i]]['asn']
+        asnum2=assignment_temp[stubAS[3*i+1]]['asn']
+        asnum3=assignment_temp[stubAS[3*i+2]]['asn']
 
+        receiver1=f"iperf-receiver-{i}-1"
+        receiver2=f"iperf-receiver-{i}-2"
+        traffic_service.install(receiver1, TrafficServiceType.IPERF_RECEIVER, log_file="/root/iperf3_receiver.log")
+        traffic_service.install(receiver2, TrafficServiceType.IPERF_RECEIVER, log_file="/root/iperf3_receiver.log")
+        traffic_service.install(
+            f"iperf-generator-{i}",
+            TrafficServiceType.IPERF_GENERATOR,
+            log_file="/root/iperf3_generator.log",
+            protocol="TCP",
+            duration=36000,
+            rate=0
+        ).addReceivers(hosts=[receiver1, receiver2])
+        
+        # Add hosts to AS-150
 
+        as1 = base.getAutonomousSystem(asnum1)
+        as1.createHost(f"iperf-generator-{i}").joinNetwork("net0")
+
+        # Add hosts to AS-162
+        as2 = base.getAutonomousSystem(asnum2)
+        as2.createHost(f"iperf-receiver-{i}-1").joinNetwork("net0")
+
+        # Add hosts to AS-171
+        as3 = base.getAutonomousSystem(asnum3)
+        as3.createHost(f"iperf-receiver-{i}-2").joinNetwork("net0")
+        emu.addBinding(
+            Binding(f"iperf-generator-{i}", filter=Filter(asn=asnum1, nodeName=f"iperf-generator-{i}"))
+        )
+        emu.addBinding(
+            Binding(receiver1, filter=Filter(asn=asnum2, nodeName=receiver1))
+        )
+        emu.addBinding(
+            Binding(receiver2, filter=Filter(asn=asnum3, nodeName=receiver2))
+        )
+
+    # Add the layers
+    emu.addLayer(traffic_service)
+    emu.addLayer(etc_hosts)
+
+def get_assignment(asn,assignment=assignment):
+    t=len(assignment)
+    if asn not in assignment.keys():
+        assignment[asn]={'asn':t+1,'ipv4':f'{(t+1) //256}.{(t+1) %256}.0.0/16'}
+    return assignment
 def update_topology_from_file(TOPOLOGY_DATA,max_new_asns=100):
     """
     从文件中读取数据更新拓扑
@@ -136,12 +187,12 @@ def update_topology_from_file(TOPOLOGY_DATA,max_new_asns=100):
                             if added_asns_count >= max_new_asns:
                                 break # 跳出内层循环，外层循环会在下一次迭代时捕获并break
 
-                            TOPOLOGY_DATA['stub_asns'].append(as1)
+                            TOPOLOGY_DATA['stub_asns'].append(str(as1))
                             existing_stubs.add(as1) # 更新缓存
                             added_asns_count += 1
                         
                             # 添加边 (a, X, ixp, -1) -> (as0, as1, ixp, -1)
-                            new_edge = (as0, as1, ixp, -1)
+                            new_edge = (str(as0), str(as1), ixp, '-1')
                             # 简单去重检查
                             if new_edge not in TOPOLOGY_DATA['as_as_ix_edges']:
                                 TOPOLOGY_DATA['as_as_ix_edges'].append(new_edge)
@@ -248,6 +299,25 @@ class ResourceMonitor:
             self.thread.join()
         print(f"资源监控已停止，日志已保存至：{self.log_path}")
 
+def makeStubAsWithHosts(emu: Emulator, base: Base, asn: int, prefix: str, exchange: int, hosts_total: int):
+
+    # Create AS and internal network
+    network = "net0"
+
+    stub_as = base.createAutonomousSystem(asn)
+    stub_as.createNetwork(network,prefix)
+
+    # Create a BGP router
+    # Attach the router to both the internal and external networks
+    router = stub_as.createRouter('r{}'.format(exchange))
+    router.joinNetwork(network)
+    router.joinNetwork('ix{}'.format(exchange),str(IPv4Network(node_prefix[exchange])[asn]))
+
+    for counter in range(hosts_total):
+       name = 'host_{}'.format(counter)
+       host = stub_as.createHost(name)
+       host.joinNetwork(network)
+
 def makeTransitAs(base: Base, asn: int, prefix: str, exchanges: List[int],
     intra_ix_links: List[Tuple[int, int]],node_prefix=node_prefix) -> AutonomousSystem:
     """!
@@ -328,29 +398,23 @@ def load_topology_data(filename: str) -> dict:
         raise ValueError(f"解析拓扑数据失败: {e}")
 
 def run(dumpfile=None, hosts_per_as=2): 
-    ###############################################################################
-    # 设置平台信息
+    # Set the platform information
     if dumpfile is None:
         script_name = os.path.basename(__file__)
-
-        if len(sys.argv) == 1:
-            platform = Platform.AMD64
-        elif len(sys.argv) == 2:
-            if sys.argv[1].lower() == 'amd':
-                platform = Platform.AMD64
-            elif sys.argv[1].lower() == 'arm':
-                platform = Platform.ARM64
-            else:
-                print(f"用法:  {script_name} amd|arm")
-                sys.exit(1)
+        platform = Platform.AMD64
+        if len(sys.argv) > 1:
+            # 注意：命令行参数默认都是 String 类型，如果是数字需要转换
+            x = int(sys.argv[1]) 
+            print(f"接收到的参数 x 是: {x}")
         else:
-            print(f"用法:  {script_name} amd|arm")
-            sys.exit(1)
+            print("请提供参数 x")
+            x = 214 # 设置默认值
 
     # 加载拓扑数据
     try:
+        #TOPOLOGY_DATA = load_topology_data(f'real_topology_{x}.txt')
         TOPOLOGY_DATA = load_topology_data('real_topology_214.txt')
-        #TOPOLOGY_DATA = update_topology_from_file(TOPOLOGY_DATA,max_new_asns=50)
+        #TOPOLOGY_DATA = update_topology_from_file(TOPOLOGY_DATA,max_new_asns=100)
     except FileNotFoundError:
         print("错误: 未找到real_topology_1078.txt文件")
         sys.exit(1)
@@ -415,19 +479,23 @@ def run(dumpfile=None, hosts_per_as=2):
 
     stub_ix_map = {}
     for (provider, customer, ix, rel) in TOPOLOGY_DATA["as_as_ix_edges"]:
-        if rel == -1 and customer in TOPOLOGY_DATA["stub_asns"]:
+        if rel == '-1' and customer in TOPOLOGY_DATA["stub_asns"]:
             stub_ix_map[customer] = ix
-
+    print(TOPOLOGY_DATA["stub_asns"])
+    assignment_temp=assignment.copy()
     for stub_asn in TOPOLOGY_DATA["stub_asns"]:
-        ix = stub_ix_map[stub_asn]
-        Makers.makeStubAsWithHosts(emu, base, stub_asn, ix, hosts_per_as)
-        print(f"创建Stub AS{stub_asn}: 连接IXP{ix}, 主机数量{hosts_per_as}")
+        assignment_temp=get_assignment(stub_asn,assignment_temp)
+        asn=assignment_temp[stub_asn]['asn']
+        prefix=assignment_temp[stub_asn]['ipv4']
+        ix = assignment_temp[stub_ix_map[stub_asn]]['asn']
+        makeStubAsWithHosts(emu, base, asn, prefix, ix, hosts_total=0)
+        print(f"创建Stub AS{asn}: 连接IXP{ix}, 主机数量{hosts_per_as}")
     
     # 配置私有对等关系
     for (a, b, ix, rel) in TOPOLOGY_DATA["as_as_ix_edges"]:
-        a = assignment[a]['asn']
-        b = assignment[b]['asn']
-        ix = assignment[ix]['asn']
+        a = assignment_temp[a]['asn']
+        b = assignment_temp[b]['asn']
+        ix = assignment_temp[ix]['asn']
         rel = int(rel)
         # 转换关系: -1→Provider, 0→Peer
         if rel == -1:
@@ -439,7 +507,10 @@ def run(dumpfile=None, hosts_per_as=2):
         
         ebgp.addPrivatePeerings(ix, [a], [b], relationship)
         print(f"IXP{ix}配置私有对等: AS{a}与AS{b} (关系: {rel})")
+
+    #add_traffic(base, emu, TOPOLOGY_DATA["stub_asns"], assignment_temp, num=5)
     t=time.time()
+
     print("开始编译仿真网络...")
     ######################################################
     # #########################
@@ -464,12 +535,13 @@ def run(dumpfile=None, hosts_per_as=2):
     print(f"编译时间: {time.time()-t} 秒")
 
 if __name__ == "__main__":
+    run()
     # 初始化监控器（监控间隔1秒）
-    monitor = ResourceMonitor(interval=1)
-    # 启动监控
-    monitor.start()
-    try:
-        run()
-    finally:
-        # 无论程序是否异常，确保监控停止
-        monitor.stop()
+    # monitor = ResourceMonitor(interval=1)
+    # # 启动监控
+    # monitor.start()
+    # try:
+    #     run()
+    # finally:
+    #     # 无论程序是否异常，确保监控停止
+    #     monitor.stop()
