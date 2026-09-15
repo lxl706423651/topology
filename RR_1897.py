@@ -25,53 +25,6 @@ node_prefix={}
 for key,value in assignment.items():
     node_prefix[value['asn']]=value['ipv4']
 
-def add_traffic(base, emu, stubAS, assignment_temp, num=10):
-    etc_hosts = EtcHosts()
-    traffic_service = TrafficService()
-    for i in range(num):
-        asnum1=assignment_temp[stubAS[3*i]]['asn']
-        asnum2=assignment_temp[stubAS[3*i+1]]['asn']
-        asnum3=assignment_temp[stubAS[3*i+2]]['asn']
-
-        receiver1=f"iperf-receiver-{i}-1"
-        receiver2=f"iperf-receiver-{i}-2"
-        traffic_service.install(receiver1, TrafficServiceType.IPERF_RECEIVER, log_file="/root/iperf3_receiver.log")
-        traffic_service.install(receiver2, TrafficServiceType.IPERF_RECEIVER, log_file="/root/iperf3_receiver.log")
-        traffic_service.install(
-            f"iperf-generator-{i}",
-            TrafficServiceType.IPERF_GENERATOR,
-            log_file="/root/iperf3_generator.log",
-            protocol="TCP",
-            duration=36000,
-            rate=0
-        ).addReceivers(hosts=[receiver1, receiver2])
-        
-        # Add hosts to AS-150
-
-        as1 = base.getAutonomousSystem(asnum1)
-        as1.createHost(f"iperf-generator-{i}").joinNetwork("net0")
-
-        # Add hosts to AS-162
-        as2 = base.getAutonomousSystem(asnum2)
-        as2.createHost(f"iperf-receiver-{i}-1").joinNetwork("net0")
-
-        # Add hosts to AS-171
-        as3 = base.getAutonomousSystem(asnum3)
-        as3.createHost(f"iperf-receiver-{i}-2").joinNetwork("net0")
-        emu.addBinding(
-            Binding(f"iperf-generator-{i}", filter=Filter(asn=asnum1, nodeName=f"iperf-generator-{i}"))
-        )
-        emu.addBinding(
-            Binding(receiver1, filter=Filter(asn=asnum2, nodeName=receiver1))
-        )
-        emu.addBinding(
-            Binding(receiver2, filter=Filter(asn=asnum3, nodeName=receiver2))
-        )
-
-    # Add the layers
-    emu.addLayer(traffic_service)
-    emu.addLayer(etc_hosts)
-
 def get_assignment(asn,assignment=assignment):
     t=len(assignment)
     if asn not in assignment.keys():
@@ -321,22 +274,6 @@ def makeTransitAs(base: Base, asn: int, prefix: str, exchanges: List[int],
 
     return transit_as
 
-def find_maximal_cliques(edge_list):
-    # 1. 创建一个无向图
-    G = nx.Graph()
-
-    # 2. 将列表 b 中的所有边添加到图中
-    G.add_edges_from(edge_list)
-
-
-    # 3. 查找图 G 中的所有极大团
-    # nx.find_cliques(G) 返回一个生成器(generator)，每个元素是一个 set
-    cliques_generator = nx.find_cliques(G)
-
-    # 4. 将结果转换为列表，并对每个团内部进行排序（以便于查看）
-    #    使用 sorted(list(clique)) 来匹配您期望的输出格式
-    result = [sorted(list(clique)) for clique in cliques_generator]
-    return result
 
 def load_topology_data(filename: str) -> dict:
     """从文件加载拓扑数据（兼容 key: value 格式）"""
@@ -378,7 +315,7 @@ def run(dumpfile=None, hosts_per_as=2):
         #TOPOLOGY_DATA = load_topology_data('real_topology_1897.txt')
         #TOPOLOGY_DATA = update_topology_from_file(TOPOLOGY_DATA,max_new_asns=100)
     except FileNotFoundError:
-        print("错误: 未找到real_topology_1078.txt文件")
+        print(f"错误: 未找到real_topology_{x}.txt文件")
         sys.exit(1)
     except Exception as e:
         print(f"解析拓扑数据出错: {e}")
@@ -428,10 +365,6 @@ def run(dumpfile=None, hosts_per_as=2):
         asn = assignment[asnuber]['asn']
         prefix = assignment[asnuber]['ipv4']
         exchanges, intra_links = transit_info[asn]
-        # temp=find_maximal_cliques(intra_links)
-        # links=[]
-        # for clique in temp:
-        #     links.extend([(clique[i], clique[(i + 1) % len(clique)]) for i in range(len(clique))])
         links=[]
         clique=sorted(exchanges)
         links=generate_connected_pairs(clique, min(2*len(clique),253-len(clique)))
@@ -473,7 +406,6 @@ def run(dumpfile=None, hosts_per_as=2):
         ebgp.addPrivatePeerings(ix, [a], [b], relationship)
         print(f"IXP{ix}配置私有对等: AS{a}与AS{b} (关系: {rel})")
 
-    #add_traffic(base, emu, TOPOLOGY_DATA["stub_asns"], assignment_temp, num=5)
     t=time.time()
 
     print("开始编译仿真网络...")
@@ -495,8 +427,8 @@ def run(dumpfile=None, hosts_per_as=2):
         emu.render()
         # 附加Internet Map容器并编译
         docker = Docker(platform=platform)
-        emu.compile(docker, './output', override=True)
-        print("仿真网络编译完成，输出目录: ./output")
+        emu.compile(docker, output_dir, override=True)#f'real_topology_{x}.txt'
+        print(f"仿真网络编译完成，输出目录: {output_dir}")
     print(f"编译时间: {time.time()-t} 秒")
 
 if __name__ == "__main__":
