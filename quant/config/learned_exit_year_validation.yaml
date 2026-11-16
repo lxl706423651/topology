@@ -1,0 +1,28 @@
+# 四组留一年回顾研究；继承已有行情、资金、成本配置，不修改原年度实验。
+base_config: config/annual_method_validation.yaml
+output_dir: reports/learned_exit_year_validation
+aux_cache_dir: reports/learned_exit_year_validation/cache
+test_years: [2023, 2024, 2025, 2026]
+# 每个非测试年依交易日顺序切为拟合60%、校准20%、验证20%，不在验证后重拟合。
+fit_fraction: 0.60
+calibration_fraction: 0.20
+embargo_days: 7
+sharpe_target: 3.0
+minimum_positive_validation_segments: 2
+min_closed_lots: 20
+train_shortlist: 2
+gate_quantiles: [0.50, 0.80, 0.90]
+entry_min_net_return: 0.0
+label_clip: 0.20
+exit_entry_stride: 8
+exit_ages: [1, 3, 5, 10, 20]
+max_exit_training_rows: 600000
+cta_blend: 0.0005
+model_profiles:
+  - {name: shallow_regularized, max_depth: 3, n_estimators: 180, min_child_weight: 80, reg_lambda: 12.0}
+  - {name: deeper_regularized, max_depth: 5, n_estimators: 240, min_child_weight: 80, reg_lambda: 16.0}
+exit_model: {max_depth: 4, n_estimators: 180, min_child_weight: 80, reg_lambda: 12.0}
+exit_candidates:
+  - {name: continuation0_atr10_20, initial: 10.0, trailing: 20.0, max_days: 10, exit_threshold: 0.0}
+  - {name: continuation_negative_atr10_20, initial: 10.0, trailing: 20.0, max_days: 10, exit_threshold: -0.001}
+  - {name: continuation0_atr20_40, initial: 20.0, trailing: 40.0, max_days: 20, exit_threshold: 0.0}

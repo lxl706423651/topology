@@ -1,0 +1,61 @@
+# 固定底仓做T：相对路径按项目根目录解释，完整配置随报告保存。
+data_root: ashare_minute_data_2023_2026_04/extracted
+output_dir: reports/inventory_t_cross_validation
+cache_dir: reports/annual_method_validation/panel_cache
+signal_cache_dir: reports/inventory_t_cross_validation/cache
+exclude_flat_signal_bars: true
+start_date: '2023-01-01'
+end_date: '2026-04-30'
+test_years: [2023, 2024, 2025, 2026]
+workers: 12
+max_symbols: 0
+name_snapshot: config/stock_name_cache/a_stock_names_20260614.csv
+universe_size: 300
+min_week_days: 3
+sample_minutes: 24
+min_cross_section: 30
+max_features: 154
+feature_max_correlation: 0.90
+feature_min_coverage: 0.80
+feature_selection_sample_rows: 20000
+min_training_rows: 100
+max_train_rows: 0
+embargo_days: 7
+entry_method: cta_trend
+cta_blend: 0.0005
+gate_quantile: 0.90
+spread_quantile: null
+initial_cash: 1000000
+entry_top_n: 5
+entry_equity_fraction: 0.10
+max_base_symbols: 5
+manual_buys_csv: null
+lot_size: 100
+commission_rate: 0.0008
+min_commission: 0.0
+transfer_rate: 0.00001
+stamp_rate_before_20230828: 0.001
+stamp_rate_from_20230828: 0.0005
+slippage_rate: 0.0005
+max_bar_amount_fraction: 0.05
+last_entry_time: '14:30'
+flatten_signal_time: '14:54'
+max_cycles_per_day: 2
+repurchase_buffer: 0.12
+smoke_days: 0
+selection_metric: incremental_net_pnl
+include_hold_candidate: false
+t_entry_deviations: [0.005, 0.01, 0.02]
+t_trade_fractions: [0.5, 1.0]
+t_take_profit: 0.003
+t_direction: both
+model:
+  n_estimators: 180
+  max_depth: 4
+  learning_rate: 0.04
+  min_child_weight: 40
+  subsample: 0.85
+  colsample_bytree: 0.85
+  reg_lambda: 8.0
+  reg_alpha: 0.1
+  random_state: 42

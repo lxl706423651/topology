@@ -1,0 +1,10 @@
+# 原v15短期限、core矩阵、原始标签和执行规则不变，只检验固定1%残差阈值的Huber损失。
+# 先完整core工程smoke及独审，再4折；原5%与股数恢复门槛保留，不依据外层调参。
+research_version: inventory_robust_t_v17
+source_execution_report_dir: reports/inventory_guarded_t/run_20260910_155911_227188
+training_loss: huber
+t_huber_alpha: 0.01
+t_recheck_exit_side_at_execution: true
+output_dir: reports/inventory_robust_t
+candidate_workers: 6
+workers: 12

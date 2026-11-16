@@ -1,0 +1,10 @@
+# 仅将原L2的训练特征覆盖门槛从0.80调整为0.70；保留原交易及完整核心样本。
+research_version: inventory_coverage_t_v18
+source_execution_report_dir: reports/inventory_guarded_t/run_20260910_155911_227188
+training_loss: regression_l2
+feature_min_coverage: 0.70
+source_feature_min_coverage: 0.80
+t_recheck_exit_side_at_execution: true
+output_dir: reports/inventory_coverage_t
+candidate_workers: 6
+workers: 12

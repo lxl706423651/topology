@@ -1,0 +1,121 @@
+From 0000000000000000000000000000000000000004 Mon Sep 17 00:00:00 2001
+From: Codex <codex@local>
+Date: Thu, 18 Jun 2026 17:55:00 +0800
+Subject: [PATCH] ipv4: serialize fib_info hash users for BIRD_RT_BULK K2c
+
+K2b removed global RTNL from the BIRD_RT_BULK route update path and skipped
+route notifications for a synthetic upper-bound test. 100x600k synthetic writes
+then crashed in fib_create_info(), which is consistent with fib_info hash/list
+state still depending on RTNL for serialization.
+
+This K2c experiment adds an explicit mutex around the fib_info hash users that
+the BIRD_RT_BULK path can reach without RTNL:
+
+  * fib_find_info_nh()
+  * fib_info_hash_move()
+  * fib_find_info()
+  * fib_info hash/list insert
+  * fib_release_info() removal
+
+This is still an experiment, not a complete upstreamable per-netns RTNL design.
+It intentionally keeps K2b's no-notify behavior and only fixes the observed
+fib_info hash concurrency failure.
+---
+ net/ipv4/fib_semantics.c | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/net/ipv4/fib_semantics.c b/net/ipv4/fib_semantics.c
+index 000000000000..000000000000 100644
+--- a/net/ipv4/fib_semantics.c
++++ b/net/ipv4/fib_semantics.c
+@@ -37,10 +37,12 @@
+ #include <linux/netlink.h>
+ #include <linux/hash.h>
+ #include <linux/nospec.h>
++#include <linux/mutex.h>
+ 
+ #include <net/arp.h>
+ 
+ static DEFINE_SPINLOCK(fib_info_lock);
++static DEFINE_MUTEX(fib_info_hash_mutex);
+ static struct hlist_head *fib_info_hash;
+ static struct hlist_head *fib_info_laddrhash;
+ static unsigned int fib_info_hash_size;
+@@ -260,6 +262,7 @@ EXPORT_SYMBOL_GPL(free_fib_info);
+ 
+ void fib_release_info(struct fib_info *fi)
+ {
++	mutex_lock(&fib_info_hash_mutex);
+ 	spin_lock_bh(&fib_info_lock);
+ 	if (fi && refcount_dec_and_test(&fi->fib_treeref)) {
+ 		hlist_del(&fi->fib_hash);
+@@ -285,6 +288,7 @@ void fib_release_info(struct fib_info *fi)
+ 		fib_info_put(fi);
+ 	}
+ 	spin_unlock_bh(&fib_info_lock);
++	mutex_unlock(&fib_info_hash_mutex);
+ }
+ 
+ static inline int nh_comp(struct fib_info *fi, struct fib_info *ofi)
+@@ -1410,12 +1414,15 @@ struct fib_info *fib_create_info(struct fib_config *cfg,
+ 
+ 	if (cfg->fc_nh_id) {
+ 		if (!cfg->fc_mx) {
++			mutex_lock(&fib_info_hash_mutex);
+ 			fi = fib_find_info_nh(net, cfg);
+ 			if (fi) {
+ 				refcount_inc(&fi->fib_treeref);
++				mutex_unlock(&fib_info_hash_mutex);
+ 				return fi;
+ 			}
++			mutex_unlock(&fib_info_hash_mutex);
+ 		}
+ 
+ 		nh = nexthop_find_by_id(net, cfg->fc_nh_id);
+@@ -1439,6 +1446,7 @@ struct fib_info *fib_create_info(struct fib_config *cfg,
+ 	err = -ENOBUFS;
+ 
+ 	/* Paired with WRITE_ONCE() in fib_release_info() */
++	mutex_lock(&fib_info_hash_mutex);
+ 	if (READ_ONCE(fib_info_cnt) >= fib_info_hash_size) {
+ 		unsigned int new_size = fib_info_hash_size << 1;
+ 		struct hlist_head *new_info_hash;
+@@ -1458,10 +1466,13 @@ struct fib_info *fib_create_info(struct fib_config *cfg,
+ 			fib_info_hash_move(new_info_hash, new_laddrhash, new_size);
+ 		}
+ 		if (!fib_info_hash_size) {
++			mutex_unlock(&fib_info_hash_mutex);
+ 			goto failure;
+ 		}
+ 	}
++	mutex_unlock(&fib_info_hash_mutex);
+ 
+ 	fi = kzalloc(struct_size(fi, fib_nh, nhs), GFP_KERNEL);
+ 	if (!fi)
+@@ -1588,13 +1599,16 @@ struct fib_info *fib_create_info(struct fib_config *cfg,
+ 	}
+ 
+ link_it:
++	mutex_lock(&fib_info_hash_mutex);
+ 	ofi = fib_find_info(fi);
+ 	if (ofi) {
+ 		/* fib_table_lookup() should not see @fi yet. */
+ 		fi->fib_dead = 1;
+ 		refcount_inc(&ofi->fib_treeref);
++		mutex_unlock(&fib_info_hash_mutex);
+ 		free_fib_info(fi);
+ 		return ofi;
+ 	}
+ 
+ 	refcount_set(&fi->fib_treeref, 1);
+ 	refcount_set(&fi->fib_clntref, 1);
+@@ -1628,6 +1642,7 @@ link_it:
+ 		} endfor_nexthops(fi)
+ 	}
+ 	spin_unlock_bh(&fib_info_lock);
++	mutex_unlock(&fib_info_hash_mutex);
+ 	return fi;
+ 
+ err_inval:
+-- 
+2.43.0

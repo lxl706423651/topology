@@ -1,0 +1,3 @@
+# 单独研究训练内部选择模型族，不改变父轮两固定族未晋级的结论。
+source_run: reports/pooled_path_year_validation/run_20260909_095128_476739
+output_dir: reports/family_selected_path_validation

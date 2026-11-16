@@ -1,0 +1,14 @@
+# 路径标签只供训练：沿用既有有界pkl，不改原始行情或旧研究参数。
+base_config: config/simple_signal_year_validation.yaml
+output_dir: reports/pathwise_year_validation
+path_cache_dir: reports/pathwise_year_validation/cache
+path_horizons: [3, 5, 10]
+path_exit_grace_days: 5
+# 固定股票相位覆盖更多核心日期，仍禁止同股潜在标签重叠；不按收益挑日期。
+path_training_phase: per_symbol
+path_initial_atr: 20.0
+path_trailing_atr: 40.0
+path_audit_cases: 90
+path_model_profiles:
+  - {name: shallow, num_leaves: 7, max_depth: 3, min_child_samples: 80, n_estimators: 160, reg_lambda: 10.0}
+  - {name: regularized, num_leaves: 15, max_depth: 4, min_child_samples: 160, n_estimators: 240, reg_lambda: 20.0}

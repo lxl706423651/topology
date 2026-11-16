@@ -1,0 +1,7 @@
+{
+  "protocol_version": 1,
+  "active_rule_selection": "From the predeclared enabled T candidates, choose the highest INNER incremental_net_pnl; break ties by rule_name ascending. Do not filter recovery failures and do not use outer returns or outer signal distributions for selection.",
+  "outer_diagnostics": "Evaluate exactly one internally selected active rule per outer year. Report after-cost incremental PNL, actual base capital, inventory mismatches, recovery failures, pending pairs and T+1 budget compliance. This diagnostic does not replace the strict inventory policy.",
+  "baseline": "Use exactly the same base_entry_schedule, starting cash, prices and fees as the strict policy.",
+  "declaration": "Choose this protocol before reviewing the new experiment's outer results. Copy this fixed template into its report directory as active_diagnostic_protocol.json before running diagnostics. Do not edit it to respond to outer performance."
+}

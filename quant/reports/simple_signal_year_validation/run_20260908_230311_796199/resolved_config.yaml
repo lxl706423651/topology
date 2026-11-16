@@ -1,0 +1,192 @@
+data_root: /data/lxl/seed-emulator/topology/quant/ashare_minute_data_2023_2026_04/extracted
+output_dir: /data/lxl/seed-emulator/topology/quant/reports/simple_signal_year_validation
+cache_dir: /data/lxl/seed-emulator/topology/quant/reports/annual_method_validation/panel_cache
+start_date: '2023-01-01'
+end_date: '2026-04-30'
+test_years:
+- 2023
+- 2024
+- 2025
+- 2026
+workers: 4
+max_symbols: 0
+name_snapshot: /data/lxl/seed-emulator/topology/quant/config/stock_name_cache/a_stock_names_20260614.csv
+universe_size: 300
+min_week_days: 3
+sample_minutes: 24
+min_cross_section: 30
+filter_signal_untradable: true
+max_features: 154
+feature_max_correlation: 0.9
+feature_min_coverage: 0.8
+initial_cash: 1000000
+entry_top_n: 5
+entry_equity_fraction: 0.1
+lot_size: 100
+commission_rate: 0.0008
+min_commission: 0.0
+transfer_rate: 1.0e-05
+stamp_rate_before_20230828: 0.001
+stamp_rate_from_20230828: 0.0005
+slippage_rate: 0.0005
+max_bar_amount_fraction: 0.05
+gate_quantiles:
+- 0.5
+- 0.8
+- 0.9
+cta_blend: 0.0005
+exit_candidates:
+- name: next_day_control
+  initial: 30.0
+  trailing: 60.0
+  max_days: 1
+  exit_threshold: -1000000000.0
+- name: continuation0_atr20_40
+  initial: 20.0
+  trailing: 40.0
+  max_days: 20
+  exit_threshold: 0.0
+- name: continuation_negative_atr20_40
+  initial: 20.0
+  trailing: 40.0
+  max_days: 20
+  exit_threshold: -0.001
+- name: continuation0_atr30_60
+  initial: 30.0
+  trailing: 60.0
+  max_days: 20
+  exit_threshold: 0.0
+train_shortlist: 3
+min_closed_lots: 20
+fit_deployment_model: true
+model:
+  n_estimators: 180
+  max_depth: 4
+  learning_rate: 0.04
+  min_child_weight: 40
+  subsample: 0.85
+  colsample_bytree: 0.85
+  reg_lambda: 8.0
+  reg_alpha: 0.1
+  random_state: 42
+base_config: config/bounded_year_validation.yaml
+aux_cache_dir: /data/lxl/seed-emulator/topology/quant/reports/learned_exit_year_validation/cache
+fit_fraction: 0.6
+calibration_fraction: 0.2
+embargo_days: 7
+sharpe_target: 3.0
+minimum_positive_validation_segments: 2
+entry_min_net_return: 0.0
+label_clip: 0.2
+exit_entry_stride: 8
+exit_ages:
+- 1
+- 3
+- 5
+- 10
+- 20
+max_exit_training_rows: 600000
+model_profiles:
+- name: horizon3_shallow
+  horizon: 3
+  max_depth: 3
+  n_estimators: 240
+  min_child_weight: 80
+  reg_lambda: 12.0
+- name: horizon3_deeper
+  horizon: 3
+  max_depth: 5
+  n_estimators: 300
+  min_child_weight: 80
+  reg_lambda: 16.0
+- name: horizon5_shallow
+  horizon: 5
+  max_depth: 3
+  n_estimators: 240
+  min_child_weight: 80
+  reg_lambda: 12.0
+- name: horizon5_deeper
+  horizon: 5
+  max_depth: 5
+  n_estimators: 300
+  min_child_weight: 80
+  reg_lambda: 16.0
+exit_model:
+  max_depth: 4
+  n_estimators: 180
+  min_child_weight: 80
+  reg_lambda: 12.0
+multiscale_cache_dir: /data/lxl/seed-emulator/topology/quant/reports/multiscale_year_validation/cache
+signal_cache_dir: /data/lxl/seed-emulator/topology/quant/reports/inventory_t_cross_validation/cache
+entry_horizons:
+- 3
+- 5
+feature_embargo_trading_days: 60
+minimum_signal_amount: 200000.0
+bounded_cache_dir: /data/lxl/seed-emulator/topology/quant/reports/bounded_year_validation/cache
+simple_horizons:
+- 1
+- 3
+- 5
+ridge_penalties:
+- 0.01
+- 0.1
+- 1.0
+isotonic_families:
+- oversold_reversal
+- pullback_trend
+- trend_breakout
+isotonic_bins: 10
+simple_min_training_rows: 100
+simple_min_positive_segments: 2
+simple_shortlist: 3
+simple_exits:
+- name: matched_horizon
+  exit_mode: matched_horizon
+  initial: 20.0
+  trailing: 40.0
+  max_days: 0
+- name: atr_trailing
+  exit_mode: atr_trailing
+  initial: 20.0
+  trailing: 40.0
+  max_days: 20
+is_smoke: false
+report_note: 留一年回顾研究，部分折含未来年份训练/选参；2026仅1至4月，非实盘证明。
+entry_strategy_description: 仅使用原库有限窗口白名单及有界多尺度环境，逐折内部选最多154列并拟合3/5日净收益；前5门控及每批总资产10%不变。
+report_limitations: '- 历史数据已被此前研究查看；本轮是预先固定流程的历史稳健性检查，不是全新未见样本。
+
+  - 原始行情无完整历史ST状态、退市总表、复权因子和公司行动。使用2026年名称快照排除ST/退，仍有前视筛选及幸存者偏差；原始价格的分红拆股也未完整记账。
+
+  - 交易只在信号之后的下一分钟收盘模拟成交。使用双边万八佣金、免5、日期对应印花税、双边十万分之一过户费和双边万五滑点。
+
+  - 每次成交额最多占下一分钟成交额5%，零量/缺失不成交；主板前收盘±9.5%是保守阻成交代理，不等于完整涨跌停、集合竞价及排队模型。停牌持仓用最后可见价格估值，无法反映退市损失。
+
+  - 止损在24分钟采样点和日终检查，不是逐分钟监控；T+1或无法卖出时保存待平仓状态，不保证以止损价成交。入场后的首个监控区间保守只用当前收盘更新最高价，避免引入买入前的分钟内高点。
+
+  - 各年从相同现金独立启动，年末持仓按市值保留，不虚构强制成交。跨年拼接只是独立年度收益的统计连接，不是连续持仓实盘仿真。
+
+  - 本轮算法已改为岭回归与技术信号保序校准，是独立研究对照，不能当作旧XGBoost/CTA模型复现或静默替换实盘。
+
+  - 留一年回顾研究，部分折含未来年份训练/选参；2026仅1至4月，非实盘证明。
+
+  - 核心拟合、校准、验证各为非留出年的60%/20%/20%交易日片段；每段起点隔离7自然日，标签不得跨段。留出年后另隔离60交易日，逐行审计真实来源包络；核心来源不得借用上年内部验证行情。
+
+  - 固定26个输入，不进行收益择优的特征筛选。删除递推及累计因子；ATR为240条有效分钟真实波幅简单均值，另需一条前收。20/40倍分钟ATR不是20/40倍日ATR。
+
+  - 核心拟合每股每天仅一个预定钟点，每H+1交易日取样，剔除同股重叠标签；跨股票及年度轮换仍相关，不是独立同分布实验。
+
+  - 岭回归填补和标准化只拟合核心数据；保序模型仅在事前技术资格区域拟合10个等宽强度箱。模型不在内部验证后重训，避免门槛漂移。
+
+  - 标签为H个交易日同刻下一分钟交易的扣费收益，截断至正负20%。预测不是扣容量/资金约束后的实际组合收益；ATR可提前退出，待卖出可能推迟，吊顶模式也可超过预测期限。
+
+  - 当前ST/退市名称快照不是历史状态，前收和涨跌停为代理，复权/公司行动未完整处理；这些偏差及已反复研究历史仍存在。不能保证收益或据此直接实盘。
+
+  - 每个内部片段现金重启，期末持仓按市值估值、不强行平仓。年度测试也各自现金重启，四年不是拼接的连续账户。
+
+  - 外层晋级须至少一种方法四折全部内部启用。最终每方法完整四折等权平均夏普须严格大于3；空仓无波动年不能删掉，不能把内部夏普当外层成绩。
+
+  '
+data_contract: bounded_observation_v1
+candidate_basis: 修正已确认的递推量价来源、截面贡献传播、跨年内部拟合来源及全局步长抽样依赖；不从外层成绩改模型/门控/退出网格
+atr_definition: 最近240个有效分钟真实波幅的简单均值（另需一条前收，非Wilder递推ATR）

@@ -1,0 +1,39 @@
+# 退出配对复现审计
+
+20个模型与来源逐字节相同，列序、因子清单、缓存来源和原拟合摘要也一致。
+192组原模型校准对照的开仓门槛、退出参数、平均夏普、回撤和交易计数全部精确复现。
+只比较同方法、同开仓模型、同分位、同ATR20/40的两个原模型退出对照，没有读取外层收益。
+
+## 外层必要条件
+
+| 方法代码   |   需核对折数 |   内部启用折数 | 现金保护年份   | 全部折内部启用   |
+|:-----------|-------------:|---------------:|:---------------|:-----------------|
+| method1    |            4 |              2 | 2024,2025      | False            |
+| method2    |            4 |              3 | 2025           | False            |
+
+至少一种方法全部折内部启用：否。
+本轮外层产物存在：否。
+晋级状态只是事前人工流程必要条件；不生成外层预测，不自动运行外层，也不宣称夏普目标完成。
+
+## 内部规则
+
+|   留出年 | 方法代码   | 冻结规则代码                                   |   内部选中夏普 |   入围最高内部夏普 | 内部启用   |
+|---------:|:-----------|:-----------------------------------------------|---------------:|-------------------:|:-----------|
+|     2023 | method1    | horizon5_shallow_minimum_horizon_negative_q0.8 |       1.93773  |           1.93773  | True       |
+|     2023 | method2    | horizon5_shallow_minimum_horizon_negative_q0.8 |       2.08588  |           2.08588  | True       |
+|     2024 | method1    | cash_validation_failed                         |     nan        |           0.696001 | False      |
+|     2024 | method2    | horizon3_shallow_minimum_horizon_negative_q0.9 |       1.43907  |           1.43907  | True       |
+|     2025 | method1    | cash_validation_failed                         |     nan        |          -2.41859  | False      |
+|     2025 | method2    | cash_validation_failed                         |     nan        |          -2.24751  | False      |
+|     2026 | method1    | horizon3_shallow_model_control_negative_q0.5   |       0.810799 |           0.810799 | True       |
+|     2026 | method2    | horizon3_shallow_model_control_negative_q0.5   |       1.21142  |           1.21142  | True       |
+
+method1为净收益模型基础方法，method2为相同模型加微量趋势叠加；cash_validation_failed表示内部验证失败、保持现金。
+代码含义：horizon3/5为3/5交易日预测，shallow/deeper为浅/深树，minimum_horizon为到期后才启用持仓模型，
+matched_horizon为到期同刻退出，model_control为原模型退出，negative/zero为负0.10%/零门槛，q为开仓校准分位。
+
+## 审计边界
+
+校准对照相同只能支持实现复现，不能证明期限策略有优势或样本外有效。
+独立完整性审计目录见audit_metadata.json；原始递推特征状态、非历史ST、公司行动和撮合代理限制仍存在。
+留一年协议的前三折可含未来年份拟合或选参；历史数据反复使用，不能称为未见过的前瞻测试。

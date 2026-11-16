@@ -53,7 +53,7 @@ protocol kernel {{
 }}
 """
 # 每次操作后的间隔 (秒)
-INTERVAL = 2
+INTERVAL = 0.5
 # ===========================================
 
 class Logger:
@@ -280,5 +280,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 

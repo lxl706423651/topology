@@ -1,0 +1,8 @@
+# 同一已审计v14模型、信号和底仓，仅增加首腿成交报价的反向限价复核。
+# 所有费用、资金、T+1、预测网格与评价范围均继承冻结来源配置。
+research_version: inventory_guarded_t_v15
+source_learning_report_dir: reports/inventory_learning_t/run_20260910_151232_841321
+output_dir: reports/inventory_guarded_t
+t_recheck_exit_side_at_execution: true
+candidate_workers: 6
+workers: 12

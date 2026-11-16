@@ -1,0 +1,28 @@
+--- reports/weekly_t_cross_validation/run_20260909_135906_004933/independent_frequency_audit_attempt_02_order_intent/audit_weekly_t_frequency_execution.py	2026-09-09 14:08:50.690290442 +0800
++++ scripts/audit_weekly_t_frequency_execution.py	2026-09-09 14:13:34.047019997 +0800
+@@ -114,7 +114,24 @@
+     if checks['base_plan_mismatch_count']==0 and pending==0:check_close(increment,trips.net_pnl.sum(),'paired full account identity')
+     if no_t:
+         assert not len(t) and increment==0
+-        pd.testing.assert_frame_equal(events.drop(columns=['account','reason']),base.drop(columns=['account','reason']),check_dtype=False)
++        # 基准记录原始预算请求，实际账户复制基准已成交量；容量缩量时两者意图可不同。
++        pd.testing.assert_frame_equal(events.drop(columns=['account','reason','planned_shares']),base.drop(columns=['account','reason','planned_shares']),check_dtype=False)
++        buys=events.side.eq('buy')
++        check_close(events.loc[buys,'planned_shares'],base.loc[buys,'shares'],'actual copied baseline filled order')
++        check_close(events.loc[~buys,'planned_shares'],base.loc[~buys,'planned_shares'],'same no-T sell order')
++        plans=read_audit_csv(folder/'weekly_entry_plans.csv')
++        assert plans.plan_id.is_unique
++        check_close(plans.entry_budget,plans.baseline_entry_equity*cfg['base_fraction']/cfg['top_n'],'fixed baseline entry budget')
++        reference=plans.known_reference_price
++        requested=np.where(np.isfinite(reference)&reference.gt(0),np.floor(plans.entry_budget/(reference*(1+cfg['slippage_rate']))/cfg['lot_size'])*cfg['lot_size'],0)
++        check_close(plans.planned_shares,requested,'prior-price planned shares')
++        assert (plans.baseline_filled_shares.le(plans.planned_shares)&plans.baseline_filled_shares.ge(0)).all()
++        check_close(plans.actual_filled_shares,plans.baseline_filled_shares,'no-T baseline filled quantity')
++        filled=plans.loc[plans.baseline_filled_shares.gt(0)].set_index('plan_id')
++        assert set(base.loc[buys,'plan_id'])==set(filled.index)
++        matched=filled.loc[base.loc[buys,'plan_id']]
++        check_close(base.loc[buys,'planned_shares'],matched.planned_shares,'baseline original requested shares')
++        check_close(base.loc[buys,'shares'],matched.baseline_filled_shares,'baseline plan actual fills')
+     result={**checks,'incremental_net_pnl':increment,'active_days':int(first.datetime.dt.normalize().nunique()),
+             'active_stock_days':len(first.assign(date=first.datetime.dt.normalize())[['date','symbol']].drop_duplicates()),
+             'event_count':len(events),'cash_max_abs_error_CNY':max_cash_error,'passed':True}

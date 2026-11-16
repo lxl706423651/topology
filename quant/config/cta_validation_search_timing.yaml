@@ -1,0 +1,15 @@
+# 第三阶段预案：前阶段每天09:31检查的共同规则接近目标，研究固定日内时点，仍保留三折。
+prediction_config: config/cta_validation_search.yaml
+output_dir: reports/cta_validation_search_timing
+sharpe_target: 2.0
+minimum_closed_lots_per_fold: 20
+timing_model_names:
+  - exit0_shallow_probability
+  - exit0_regularized_probability
+  - exit1_shallow_probability
+  - exit1_regularized_probability
+styles: [breakout, trend]
+offsets: [0, 24, 48, 72, 96, 120, 144, 168, 192, 216]
+probability_gates: [0.30, 0.325, 0.35, 0.355, 0.36, 0.365, 0.37, 0.375, 0.38, 0.385, 0.39, 0.40, 0.425]
+workers: 12
+save_every: 20

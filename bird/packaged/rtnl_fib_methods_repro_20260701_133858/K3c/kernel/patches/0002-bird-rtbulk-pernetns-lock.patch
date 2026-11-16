@@ -1,0 +1,135 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Codex <codex@local>
+Date: Thu, 18 Jun 2026 01:20:00 +0800
+Subject: [PATCH] ipv4: make BIRD_RT_BULK use a private per-netns route lock
+
+This is the K2 experiment from bird/0618ExperimentDesign.md.
+
+It intentionally changes only the experimental BIRD_RT_BULK generic-netlink
+path added by K1.  Standard RTM_NEWROUTE/RTM_DELROUTE still use the upstream
+rtnetlink path and global RTNL.
+
+The K2 path registers per-network-namespace storage and gives each netns one
+private mutex.  APPLY_V4 serializes bulk route writers that target the same
+netns, but writers in different netns no longer serialize on the global RTNL
+inside this private API.
+
+Important limitation: fib_table_insert() and fib_table_delete() are documented
+as "Caller must hold RTNL" in upstream fib_trie.c.  This patch is therefore not
+a production-safe replacement for RTNL.  It is only for isolated synthetic
+SeedEMU tests where no concurrent device, nexthop, VRF, multipath, or fib-rules
+mutation happens while bulk route writes are running.
+---
+ net/ipv4/fib_bulk.c | 54 ++++++++++++++++++++++++++++++++++++++++++----------
+ 1 file changed, 44 insertions(+), 10 deletions(-)
+
+diff --git a/net/ipv4/fib_bulk.c b/net/ipv4/fib_bulk.c
+index 84e8bbad43ff..f2d5c9e8d6f0 100644
+--- a/net/ipv4/fib_bulk.c
++++ b/net/ipv4/fib_bulk.c
+@@ -2,12 +2,14 @@
+ #include <linux/bird_rtbulk.h>
+ #include <linux/ktime.h>
+ #include <linux/module.h>
++#include <linux/mutex.h>
+ #include <linux/rtnetlink.h>
+ #include <net/genetlink.h>
+ #include <net/ip_fib.h>
+ #include <net/net_namespace.h>
++#include <net/netns/generic.h>
+ #include <net/netlink.h>
+ 
+ struct bird_rtbulk_stats {
+@@ -20,6 +22,27 @@ struct bird_rtbulk_stats {
+ 
+ static struct genl_family bird_rtbulk_genl_family;
+ 
++struct bird_rtbulk_net {
++	struct mutex route_lock;
++};
++
++static unsigned int bird_rtbulk_net_id;
++
++static struct bird_rtbulk_net *bird_rtbulk_pernet(struct net *net)
++{
++	return net_generic(net, bird_rtbulk_net_id);
++}
++
++static int __net_init bird_rtbulk_net_init(struct net *net)
++{
++	mutex_init(&bird_rtbulk_pernet(net)->route_lock);
++	return 0;
++}
++
++static struct pernet_operations bird_rtbulk_net_ops = {
++	.init = bird_rtbulk_net_init,
++	.id = &bird_rtbulk_net_id,
++	.size = sizeof(struct bird_rtbulk_net),
++};
++
+ static const struct nla_policy bird_rtbulk_policy[BIRD_RTBULK_A_MAX + 1] = {
+ 	[BIRD_RTBULK_A_OPS] = { .type = NLA_BINARY },
+ };
+@@ -128,6 +151,8 @@ static int bird_rtbulk_apply_v4(struct sk_buff *skb, struct genl_info *info)
+ 	const struct bird_rtbulk_op_v1 *ops;
+ 	struct bird_rtbulk_stats stats = {};
++	struct bird_rtbulk_net *bn;
++	struct net *net;
+ 	struct nlattr *attr;
+ 	ktime_t start;
+ 	int count;
+@@ -146,14 +171,24 @@ static int bird_rtbulk_apply_v4(struct sk_buff *skb, struct genl_info *info)
+ 		return -EINVAL;
+ 
+ 	ops = nla_data(attr);
++	net = genl_info_net(info);
++	bn = bird_rtbulk_pernet(net);
+ 	start = ktime_get();
+ 
+-	rtnl_lock();
++	/*
++	 * K2 experiment: intentionally avoid the global RTNL in this private
++	 * synthetic path and serialize only writers targeting the same netns.
++	 *
++	 * fib_table_insert/delete are documented as RTNL-protected upstream
++	 * APIs, so this mode is not a production replacement.  It is only for
++	 * isolated SeedEMU synthetic netns tests with no concurrent device,
++	 * nexthop, VRF, or fib-rules mutation.
++	 */
++	mutex_lock(&bn->route_lock);
+ 	for (i = 0; i < count; i++) {
+ 		int err;
+ 
+-		err = bird_rtbulk_apply_one_v4(genl_info_net(info), &ops[i],
+-					       info->extack);
++		err = bird_rtbulk_apply_one_v4(net, &ops[i], info->extack);
+ 		if (err) {
+ 			stats.fail_count++;
+ 			if (!stats.first_fail_errno) {
+@@ -166,7 +201,7 @@ static int bird_rtbulk_apply_v4(struct sk_buff *skb, struct genl_info *info)
+ 			stats.success_count++;
+ 		}
+ 	}
+-	rtnl_unlock();
++	mutex_unlock(&bn->route_lock);
+ 
+ 	stats.apply_nsec = ktime_to_ns(ktime_sub(ktime_get(), start));
+ 	return bird_rtbulk_reply(info, &stats);
+@@ -199,6 +234,17 @@ static struct genl_family bird_rtbulk_genl_family __ro_after_init = {
+ 
+ static int __init bird_rtbulk_init(void)
+ {
+-	return genl_register_family(&bird_rtbulk_genl_family);
++	int err;
++
++	err = register_pernet_subsys(&bird_rtbulk_net_ops);
++	if (err)
++		return err;
++
++	err = genl_register_family(&bird_rtbulk_genl_family);
++	if (err)
++		unregister_pernet_subsys(&bird_rtbulk_net_ops);
++
++	return err;
+ }
+ subsys_initcall(bird_rtbulk_init);

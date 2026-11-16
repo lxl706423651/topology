@@ -1,0 +1,17 @@
+# 第二阶段：第一阶段边界候选概率门槛0.40表现较好，向更低门槛扩展，不接触2026。
+# 保留相同过去模型集合以复用验证预测；净收益模型仅作门槛0的共同对照。
+source_report: reports/xgb_cta_expanded/run_20260910_122142_766807
+prediction_cache: reports/cta_validation_prediction_cache
+output_dir: reports/cta_validation_search_lower_gates
+sharpe_target: 2.0
+minimum_closed_lots_per_fold: 20
+objectives: [return, probability]
+profiles: [shallow, regularized]
+exit_ids: [0, 1]
+styles: [breakout, trend]
+frequencies: [24, 48, 120, 240]
+contexts: [none, breadth, market_trend, quiet, avoid_chase]
+return_gates: [0.0]
+probability_gates: [0.0, 0.1, 0.2, 0.3, 0.325, 0.35, 0.375, 0.4]
+workers: 12
+save_every: 20

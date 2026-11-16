@@ -1,0 +1,6 @@
+# Optional. The framework has pandas/numpy fallbacks for these indicators.
+TA-Lib
+
+# Optional model runtimes. Install only the one matching your packaged model.
+torch
+tensorflow

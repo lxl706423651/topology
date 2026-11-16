@@ -1,0 +1,352 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Codex <codex@local>
+Date: Thu, 18 Jun 2026 00:05:00 +0800
+Subject: [PATCH] ipv4: add experimental BIRD_RT_BULK global-RTNL route writer
+
+This is the K1 experiment from bird/0618ExperimentDesign.md.
+
+It adds an experimental generic-netlink family named BIRD_RT_BULK.  The
+APPLY_V4 command accepts a compact array of IPv4 route operations and applies
+them while holding the existing global RTNL mutex once for the whole request.
+
+Scope intentionally stays narrow:
+
+  * IPv4 only.
+  * Single current network namespace only.
+  * No ECMP, IPv6, nexthop objects, VRF, or lwtunnel handling.
+  * Intended for synthetic dev-lo/blackhole benchmarks before real BIRD FIB
+    command replay.
+
+This patch does not attempt per-netns route locking.  It is only meant to
+measure how much overhead is removed by avoiding one netlink message and one
+RTNL lock/unlock cycle per route operation.
+---
+ include/uapi/linux/bird_rtbulk.h |  54 ++++++++++
+ net/ipv4/Kconfig                 |  12 +++
+ net/ipv4/Makefile                |   1 +
+ net/ipv4/fib_bulk.c              | 176 ++++++++++++++++++++++++++++++++
+ 4 files changed, 243 insertions(+)
+ create mode 100644 include/uapi/linux/bird_rtbulk.h
+ create mode 100644 net/ipv4/fib_bulk.c
+
+diff --git a/include/uapi/linux/bird_rtbulk.h b/include/uapi/linux/bird_rtbulk.h
+new file mode 100644
+index 000000000000..c29bd1f89c11
+--- /dev/null
++++ b/include/uapi/linux/bird_rtbulk.h
+@@ -0,0 +1,59 @@
++/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
++#ifndef _UAPI_LINUX_BIRD_RTBULK_H
++#define _UAPI_LINUX_BIRD_RTBULK_H
++
++#include <linux/types.h>
++
++#define BIRD_RTBULK_GENL_NAME "BIRD_RT_BULK"
++#define BIRD_RTBULK_GENL_VERSION 1
++
++enum bird_rtbulk_cmd {
++	BIRD_RTBULK_CMD_UNSPEC,
++	BIRD_RTBULK_CMD_APPLY_V4,
++	__BIRD_RTBULK_CMD_MAX,
++};
++#define BIRD_RTBULK_CMD_MAX (__BIRD_RTBULK_CMD_MAX - 1)
++
++enum bird_rtbulk_attr {
++	BIRD_RTBULK_A_UNSPEC,
++	BIRD_RTBULK_A_OPS,
++	BIRD_RTBULK_A_SUCCESS_COUNT,
++	BIRD_RTBULK_A_FAIL_COUNT,
++	BIRD_RTBULK_A_FIRST_FAIL_INDEX,
++	BIRD_RTBULK_A_FIRST_FAIL_ERRNO,
++	BIRD_RTBULK_A_APPLY_NSEC,
++	__BIRD_RTBULK_A_MAX,
++};
++#define BIRD_RTBULK_A_MAX (__BIRD_RTBULK_A_MAX - 1)
++
++enum bird_rtbulk_op {
++	BIRD_RTBULK_OP_UNSPEC,
++	BIRD_RTBULK_OP_REPLACE,
++	BIRD_RTBULK_OP_ADD,
++	BIRD_RTBULK_OP_DEL,
++};
++
++/*
++ * One compact IPv4 route operation.
++ *
++ * The first experiment intentionally avoids nested netlink attributes so user
++ * space can send a dense binary array.  Generic-netlink attributes still have
++ * a 16-bit length field, so practical request size is around 1024-2048 ops per
++ * message depending on struct growth.
++ */
++struct bird_rtbulk_op_v1 {
++	__u8 op;          /* enum bird_rtbulk_op */
++	__u8 dst_len;     /* 0..32 */
++	__u8 type;        /* RTN_*; 0 means RTN_UNICAST for add/replace */
++	__u8 scope;       /* RT_SCOPE_* */
++	__u8 protocol;    /* RTPROT_*; 0 means RTPROT_STATIC */
++	__u8 pad[3];
++	__be32 dst;
++	__be32 gateway;   /* 0 for no gateway */
++	__s32 ifindex;    /* 0 for no explicit output device */
++	__u32 table;      /* 0 means RT_TABLE_MAIN */
++	__u32 metric;
++	__u32 flags;      /* RTNH_F_ONLINK, etc.; copied to fib_config.fc_flags */
++};
++
++#endif /* _UAPI_LINUX_BIRD_RTBULK_H */
+diff --git a/net/ipv4/Kconfig b/net/ipv4/Kconfig
+index 5d3e2c6c4f80..7f39973ef9fc 100644
+--- a/net/ipv4/Kconfig
++++ b/net/ipv4/Kconfig
+@@ -116,7 +116,21 @@ config IP_ROUTE_VERBOSE
+ config IP_ROUTE_CLASSID
+ 	bool
+ 
++config BIRD_RT_BULK
++	bool "BIRD experimental IPv4 route bulk writer"
++	depends on INET
++	depends on NET
++	default n
++	help
++	  Experimental generic-netlink route bulk writer for SeedEMU/BIRD RTNL
++	  experiments.  It applies a compact array of IPv4 route operations in
++	  the current network namespace while holding the existing global RTNL
++	  mutex once for the request.
++
++	  This is not a production API.  Say N unless running the BIRD/RTNL
++	  experiments.
++
+ config IP_PNP
+ 	bool "IP: kernel level autoconfiguration"
+ 	help
+ 	  This enables automatic configuration of IP addresses of devices and
+diff --git a/net/ipv4/Makefile b/net/ipv4/Makefile
+index 5d8286f1d90f..9673fbc7641f 100644
+--- a/net/ipv4/Makefile
++++ b/net/ipv4/Makefile
+@@ -19,6 +19,7 @@ obj-y     := route.o inetpeer.o protocol.o \
+ 	     metrics.o netlink.o nexthop.o udp_tunnel_stub.o
+ 
+ obj-$(CONFIG_NET_IP_TUNNEL) += ip_tunnel.o
++obj-$(CONFIG_BIRD_RT_BULK) += fib_bulk.o
+ obj-$(CONFIG_SYSCTL) += sysctl_net_ipv4.o
+ obj-$(CONFIG_PROC_FS) += proc.o
+ obj-$(CONFIG_IP_MULTIPLE_TABLES) += fib_rules.o
+diff --git a/net/ipv4/fib_bulk.c b/net/ipv4/fib_bulk.c
+new file mode 100644
+index 000000000000..84e8bbad43ff
+--- /dev/null
++++ b/net/ipv4/fib_bulk.c
+@@ -0,0 +1,210 @@
++// SPDX-License-Identifier: GPL-2.0
++#include <linux/bird_rtbulk.h>
++#include <linux/ktime.h>
++#include <linux/module.h>
++#include <linux/rtnetlink.h>
++#include <net/genetlink.h>
++#include <net/ip_fib.h>
++#include <net/net_namespace.h>
++#include <net/netlink.h>
++
++struct bird_rtbulk_stats {
++	u32 success_count;
++	u32 fail_count;
++	u32 first_fail_index;
++	s32 first_fail_errno;
++	u64 apply_nsec;
++};
++
++static struct genl_family bird_rtbulk_genl_family;
++
++static const struct nla_policy bird_rtbulk_policy[BIRD_RTBULK_A_MAX + 1] = {
++	[BIRD_RTBULK_A_OPS] = { .type = NLA_BINARY },
++};
++
++static int bird_rtbulk_apply_one_v4(struct net *net,
++				    const struct bird_rtbulk_op_v1 *op,
++				    struct netlink_ext_ack *extack)
++{
++	struct fib_config cfg = {};
++	struct fib_table *tb;
++	u8 type = op->type;
++	int err;
++
++	if (op->dst_len > 32)
++		return -EINVAL;
++
++	if (op->dst_len < 32 && (ntohl(op->dst) << op->dst_len))
++		return -EINVAL;
++
++	if (!type && op->op != BIRD_RTBULK_OP_DEL)
++		type = RTN_UNICAST;
++
++	cfg.fc_dst_len = op->dst_len;
++	cfg.fc_dst = op->dst;
++	cfg.fc_table = op->table ? op->table : RT_TABLE_MAIN;
++	cfg.fc_protocol = op->protocol ? op->protocol : RTPROT_STATIC;
++	cfg.fc_scope = op->scope;
++	cfg.fc_type = type;
++	cfg.fc_flags = op->flags;
++	cfg.fc_priority = op->metric;
++	cfg.fc_oif = op->ifindex;
++	cfg.fc_nlflags = NLM_F_REQUEST;
++	cfg.fc_nlinfo.nl_net = net;
++
++	if (op->gateway) {
++		cfg.fc_gw_family = AF_INET;
++		cfg.fc_gw4 = op->gateway;
++	}
++
++	switch (op->op) {
++	case BIRD_RTBULK_OP_ADD:
++		cfg.fc_nlflags |= NLM_F_CREATE | NLM_F_EXCL;
++		tb = fib_new_table(net, cfg.fc_table);
++		if (!tb)
++			return -ENOBUFS;
++		err = fib_table_insert(net, tb, &cfg, extack);
++		break;
++	case BIRD_RTBULK_OP_REPLACE:
++		cfg.fc_nlflags |= NLM_F_CREATE | NLM_F_REPLACE;
++		tb = fib_new_table(net, cfg.fc_table);
++		if (!tb)
++			return -ENOBUFS;
++		err = fib_table_insert(net, tb, &cfg, extack);
++		break;
++	case BIRD_RTBULK_OP_DEL:
++		tb = fib_get_table(net, cfg.fc_table);
++		if (!tb)
++			return -ESRCH;
++		err = fib_table_delete(net, tb, &cfg, extack);
++		break;
++	default:
++		err = -EINVAL;
++		break;
++	}
++
++	if (!err && cfg.fc_type == RTN_LOCAL)
++		net->ipv4.fib_has_custom_local_routes = true;
++
++	return err;
++}
++
++static int bird_rtbulk_reply(struct genl_info *info,
++			     const struct bird_rtbulk_stats *stats)
++{
++	struct sk_buff *msg;
++	void *hdr;
++	int err;
++
++	msg = genlmsg_new(NLMSG_DEFAULT_SIZE, GFP_KERNEL);
++	if (!msg)
++		return -ENOMEM;
++
++	hdr = genlmsg_put_reply(msg, info, &bird_rtbulk_genl_family, 0,
++				BIRD_RTBULK_CMD_APPLY_V4);
++	if (!hdr) {
++		nlmsg_free(msg);
++		return -ENOMEM;
++	}
++
++	err = nla_put_u32(msg, BIRD_RTBULK_A_SUCCESS_COUNT,
++			  stats->success_count);
++	if (err)
++		goto cancel;
++	err = nla_put_u32(msg, BIRD_RTBULK_A_FAIL_COUNT, stats->fail_count);
++	if (err)
++		goto cancel;
++	err = nla_put_u32(msg, BIRD_RTBULK_A_FIRST_FAIL_INDEX,
++			  stats->first_fail_index);
++	if (err)
++		goto cancel;
++	err = nla_put_s32(msg, BIRD_RTBULK_A_FIRST_FAIL_ERRNO,
++			  stats->first_fail_errno);
++	if (err)
++		goto cancel;
++	err = nla_put_u64_64bit(msg, BIRD_RTBULK_A_APPLY_NSEC,
++				stats->apply_nsec, BIRD_RTBULK_A_UNSPEC);
++	if (err)
++		goto cancel;
++
++	genlmsg_end(msg, hdr);
++	return genlmsg_reply(msg, info);
++
++cancel:
++	genlmsg_cancel(msg, hdr);
++	nlmsg_free(msg);
++	return err;
++}
++
++static int bird_rtbulk_apply_v4(struct sk_buff *skb, struct genl_info *info)
++{
++	const struct bird_rtbulk_op_v1 *ops;
++	struct bird_rtbulk_stats stats = {};
++	struct nlattr *attr;
++	ktime_t start;
++	int count;
++	int i;
++
++	attr = info->attrs[BIRD_RTBULK_A_OPS];
++	if (!attr)
++		return -EINVAL;
++
++	if (nla_len(attr) % sizeof(*ops))
++		return -EINVAL;
++
++	count = nla_len(attr) / sizeof(*ops);
++	if (!count)
++		return -EINVAL;
++
++	ops = nla_data(attr);
++	start = ktime_get();
++
++	rtnl_lock();
++	for (i = 0; i < count; i++) {
++		int err;
++
++		err = bird_rtbulk_apply_one_v4(genl_info_net(info), &ops[i],
++					       info->extack);
++		if (err) {
++			stats.fail_count++;
++			if (!stats.first_fail_errno) {
++				stats.first_fail_index = i;
++				stats.first_fail_errno = err;
++			}
++		} else {
++			stats.success_count++;
++		}
++	}
++	rtnl_unlock();
++
++	stats.apply_nsec = ktime_to_ns(ktime_sub(ktime_get(), start));
++	return bird_rtbulk_reply(info, &stats);
++}
++
++static const struct genl_small_ops bird_rtbulk_ops[] = {
++	{
++		.cmd = BIRD_RTBULK_CMD_APPLY_V4,
++		.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
++		.doit = bird_rtbulk_apply_v4,
++		.flags = GENL_ADMIN_PERM,
++	},
++};
++
++static struct genl_family bird_rtbulk_genl_family __ro_after_init = {
++	.name = BIRD_RTBULK_GENL_NAME,
++	.version = BIRD_RTBULK_GENL_VERSION,
++	.maxattr = BIRD_RTBULK_A_MAX,
++	.policy = bird_rtbulk_policy,
++	.netnsok = true,
++	.parallel_ops = true,
++	.module = THIS_MODULE,
++	.small_ops = bird_rtbulk_ops,
++	.n_small_ops = ARRAY_SIZE(bird_rtbulk_ops),
++	.resv_start_op = __BIRD_RTBULK_CMD_MAX,
++};
++
++static int __init bird_rtbulk_init(void)
++{
++	return genl_register_family(&bird_rtbulk_genl_family);
++}
++subsys_initcall(bird_rtbulk_init);
+-- 
+2.43.0

@@ -1,0 +1,11 @@
+# 固定旧模型及费用，只在训练内部比较预测期限与退出；不读取来源目录的测试结果。
+source_run: reports/multiscale_year_validation/run_20260908_212612_018862
+source_run_smoke: reports/multiscale_year_validation_smoke/run_20260908_212513_479010
+output_dir: reports/exit_alignment_year_validation
+exit_candidates:
+  - {name: model_control_zero, alignment_mode: model_control, initial: 20.0, trailing: 40.0, max_days: 20, exit_threshold: 0.0}
+  - {name: model_control_negative, alignment_mode: model_control, initial: 20.0, trailing: 40.0, max_days: 20, exit_threshold: -0.001}
+  - {name: matched_horizon, alignment_mode: matched_horizon, initial: 20.0, trailing: 40.0, max_days: 0, exit_threshold: 0.0}
+  - {name: minimum_horizon_zero, alignment_mode: minimum_horizon_model, initial: 20.0, trailing: 40.0, max_days: 20, exit_threshold: 0.0}
+  - {name: minimum_horizon_negative, alignment_mode: minimum_horizon_model, initial: 20.0, trailing: 40.0, max_days: 20, exit_threshold: -0.001}
+  - {name: next_day_control, alignment_mode: next_day_control, initial: 20.0, trailing: 40.0, max_days: 1, exit_threshold: 0.0}

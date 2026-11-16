@@ -1,0 +1,41 @@
+# 原XGBoost + CTA、ATR240初始2倍/跟踪4倍的年度回顾，不加载旧测试预测。
+data_root: ashare_minute_data_2023_2026_04/extracted
+annual_cache: reports/annual_method_validation/panel_cache/282322e813cbf3c6
+original_model_run: reports/xgboost_long_only_backtest/run_20260526_202355
+output_dir: reports/original_method_year_validation
+cache_dir: reports/original_method_year_validation/cache
+start_date: '2023-01-01'
+end_date: '2026-04-30'
+test_years: [2023, 2024, 2025, 2026]
+workers: 4
+max_symbols: 0
+fit_fraction: 0.6
+calibration_fraction: 0.2
+embargo_days: 7
+gate_quantile: 0.9
+cta_blend: 0.0005
+sample_minutes: 24
+min_cross_section: 30
+initial_cash: 1000000.0
+entry_top_n: 5
+entry_equity_fraction: 0.1
+lot_size: 100
+commission_rate: 0.0008
+min_commission: 0.0
+transfer_rate: 0.00001
+stamp_rate_before_20230828: 0.001
+stamp_rate_from_20230828: 0.0005
+slippage_rate: 0.0005
+max_bar_amount_fraction: 0.05
+sharpe_target: 3.0
+# 原配置固定，不做新网格选参；每折只重新拟合模型、校准原90%分位门槛。
+model:
+  n_estimators: 220
+  max_depth: 4
+  learning_rate: 0.04
+  min_child_weight: 20
+  subsample: 0.85
+  colsample_bytree: 0.85
+  reg_lambda: 5.0
+  reg_alpha: 0.1
+  random_state: 42

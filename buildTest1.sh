@@ -2,7 +2,7 @@
 
 # --- 配置区域 ---
 start_time=$(date +%s)
-COMPOSE_FILE="./output/docker-compose.yml"
+COMPOSE_FILE="./output_3083/docker-compose.yml"
 # --- 日志配置（新增）---
 # 定义日志目录
 BASE_DIR="${EXP_LOG_DIR:-./logs}"

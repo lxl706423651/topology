@@ -1,0 +1,10 @@
+# 单独检验下一分钟到同日14:55的预测目标；沿用v15全部经济、底仓和执行合同。
+# 每折在完整纯核心旧股队列新拟合两模型，37数字候选，内部全折5%后才正式外评。
+research_version: inventory_close_t_v16
+source_execution_report_dir: reports/inventory_guarded_t/run_20260910_155911_227188
+forecast_target: same_day_1455
+recovery_key: close
+t_recheck_exit_side_at_execution: true
+output_dir: reports/inventory_close_t
+candidate_workers: 6
+workers: 12

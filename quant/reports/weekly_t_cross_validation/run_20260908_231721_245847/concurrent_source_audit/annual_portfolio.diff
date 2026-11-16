@@ -1,0 +1,15 @@
+--- frozen_startup/annual_portfolio.py
++++ observed_workspace/annual_portfolio.py
+@@ -155,7 +155,11 @@
+         def calculate_fill(asset: int, side: str, requested: int, budget: float) -> tuple[int, float]:
+             """对 asset 的 side 请求按 requested 股/budget 元、成交额和涨跌停代理限制模拟成交。"""
+             price = execution_close[asset]
+-            if not executable or not np.isfinite(price) or execution_volume[asset] <= 0:
++            if (not executable or not np.isfinite(price) or price <= 0
++                    or not np.isfinite(execution_volume[asset]) or execution_volume[asset] <= 0
++                    or not np.isfinite(previous_close[asset]) or previous_close[asset] <= 0
++                    or not np.isfinite(market.values["execution_amount"][index, asset])
++                    or market.values["execution_amount"][index, asset] <= 0):
+                 blocked["missing_or_zero_volume"] += 1
+                 return 0, 0.0
+             # 原始文件缺少真实涨跌停价；对主板使用前收盘±9.5%的保守阻成交代理。

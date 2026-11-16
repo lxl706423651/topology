@@ -1,0 +1,52 @@
+data_root: /data/lxl/seed-emulator/topology/quant/ashare_minute_data_2023_2026_04/extracted
+output_dir: /data/lxl/seed-emulator/topology/quant/reports/annual_method_validation_smoke
+cache_dir: /data/lxl/seed-emulator/topology/quant/reports/annual_method_validation/panel_cache
+start_date: '2023-01-01'
+end_date: '2026-04-30'
+test_years:
+- 2024
+- 2025
+- 2026
+workers: 2
+max_symbols: 8
+name_snapshot: /data/lxl/seed-emulator/topology/quant/config/stock_name_cache/a_stock_names_20260614.csv
+universe_size: 8
+min_week_days: 3
+sample_minutes: 24
+min_cross_section: 4
+max_features: 12
+feature_max_correlation: 0.9
+feature_min_coverage: 0.8
+initial_cash: 1000000
+entry_top_n: 5
+entry_equity_fraction: 0.1
+lot_size: 100
+commission_rate: 0.0008
+min_commission: 0.0
+transfer_rate: 1.0e-05
+stamp_rate_before_20230828: 0.001
+stamp_rate_from_20230828: 0.0005
+slippage_rate: 0.0005
+max_bar_amount_fraction: 0.05
+gate_quantiles:
+- 0.5
+cta_blend: 0.0005
+exit_candidates:
+- name: atr240_initial2_trail4
+  initial: 2.0
+  trailing: 4.0
+  max_days: 0
+train_shortlist: 1
+min_closed_lots: 1
+fit_deployment_model: true
+model:
+  n_estimators: 8
+  max_depth: 4
+  learning_rate: 0.04
+  min_child_weight: 40
+  subsample: 0.85
+  colsample_bytree: 0.85
+  reg_lambda: 8.0
+  reg_alpha: 0.1
+  random_state: 42
+is_smoke: true

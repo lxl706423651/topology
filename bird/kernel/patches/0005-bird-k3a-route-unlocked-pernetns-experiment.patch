@@ -1,0 +1,205 @@
+From 0000000000000000000000000000000000000005 Mon Sep 17 00:00:00 2001
+From: Codex <codex@local>
+Date: Sun, 21 Jun 2026 12:40:00 +0800
+Subject: [PATCH] ipv4: add K3a controlled per-netns route path for BIRD routes
+
+K3a is a controlled experiment that tries to give the standard IPv4
+RTM_NEWROUTE/RTM_DELROUTE path namespace-concurrent semantics without changing
+all route updates at once.
+
+The IPv4 route rtnetlink handlers are registered with RTNL_FLAG_DOIT_UNLOCKED,
+but the handlers still take global RTNL internally for normal routes.  Only a
+narrow experiment route class is allowed to bypass global RTNL:
+
+  * main table
+  * RTPROT_BIRD
+  * metric 232
+  * no nexthop object
+  * no multipath, metrics, or encap attributes
+  * not RTN_LOCAL
+
+Those experiment routes reuse the BIRD_RT_BULK per-netns route mutex and K2c's
+fib_info hash/list mutex, set fc_skip_notify, and call fib_table_insert/delete
+without global RTNL.  This is intentionally not a production per-netns RTNL
+implementation.  It is a smoke-testable bridge between K2c's private bulk API
+and standard rtnetlink route messages for controlled SeedEMU/BIRD experiments.
+---
+ include/net/ip_fib.h    | 14 ++++++++++++++
+ net/ipv4/fib_bulk.c     | 28 +++++++++++++++++++++++++---
+ net/ipv4/fib_frontend.c | 70 +++++++++++++++++++++++++++++++++++++++++++++----
+ 3 files changed, 104 insertions(+), 8 deletions(-)
+
+diff --git a/include/net/ip_fib.h b/include/net/ip_fib.h
+--- a/include/net/ip_fib.h
++++ b/include/net/ip_fib.h
+@@
+ struct fib_config {
+@@
+ 	struct nlattr		*fc_encap;
+ 	u16			fc_encap_type;
+ };
+ 
++struct net;
++
++#ifdef CONFIG_BIRD_RT_BULK
++bool bird_rtbulk_k3a_route_allowed(const struct fib_config *cfg);
++void bird_rtbulk_route_lock(struct net *net);
++void bird_rtbulk_route_unlock(struct net *net);
++#else
++static inline bool bird_rtbulk_k3a_route_allowed(const struct fib_config *cfg)
++{
++	return false;
++}
++
++static inline void bird_rtbulk_route_lock(struct net *net) { }
++static inline void bird_rtbulk_route_unlock(struct net *net) { }
++#endif
++
+ struct fib_info;
+ struct rtable;
+diff --git a/net/ipv4/fib_bulk.c b/net/ipv4/fib_bulk.c
+--- a/net/ipv4/fib_bulk.c
++++ b/net/ipv4/fib_bulk.c
+@@
+ static struct bird_rtbulk_net *bird_rtbulk_pernet(struct net *net)
+ {
+ 	return net_generic(net, bird_rtbulk_net_id);
+ }
+ 
++void bird_rtbulk_route_lock(struct net *net)
++{
++	mutex_lock(&bird_rtbulk_pernet(net)->route_lock);
++}
++
++void bird_rtbulk_route_unlock(struct net *net)
++{
++	mutex_unlock(&bird_rtbulk_pernet(net)->route_lock);
++}
++
++bool bird_rtbulk_k3a_route_allowed(const struct fib_config *cfg)
++{
++	return cfg->fc_table == RT_TABLE_MAIN &&
++	       cfg->fc_protocol == RTPROT_BIRD &&
++	       cfg->fc_priority == 232 &&
++	       !cfg->fc_nh_id &&
++	       !cfg->fc_mp &&
++	       !cfg->fc_mx &&
++	       !cfg->fc_encap &&
++	       cfg->fc_type != RTN_LOCAL;
++}
++
+ static int __net_init bird_rtbulk_net_init(struct net *net)
+ {
+ 	mutex_init(&bird_rtbulk_pernet(net)->route_lock);
+ 	return 0;
+ }
+@@
+ 	const struct bird_rtbulk_op_v1 *ops;
+ 	struct bird_rtbulk_stats stats = {};
+-	struct bird_rtbulk_net *bn;
+ 	struct net *net;
+@@
+ 	ops = nla_data(attr);
+ 	net = genl_info_net(info);
+-	bn = bird_rtbulk_pernet(net);
+ 	start = ktime_get();
+@@
+-	mutex_lock(&bn->route_lock);
++	bird_rtbulk_route_lock(net);
+@@
+-	mutex_unlock(&bn->route_lock);
++	bird_rtbulk_route_unlock(net);
+diff --git a/net/ipv4/fib_frontend.c b/net/ipv4/fib_frontend.c
+--- a/net/ipv4/fib_frontend.c
++++ b/net/ipv4/fib_frontend.c
+@@
+ static int inet_rtm_delroute(struct sk_buff *skb, struct nlmsghdr *nlh,
+ 			     struct netlink_ext_ack *extack)
+ {
+@@
+ 	struct fib_table *tb;
+ 	int err;
+ 
+ 	err = rtm_to_fib_config(net, skb, nlh, &cfg, extack);
+ 	if (err < 0)
+ 		goto errout;
++
++	if (!bird_rtbulk_k3a_route_allowed(&cfg)) {
++		rtnl_lock();
++		if (cfg.fc_nh_id && !nexthop_find_by_id(net, cfg.fc_nh_id)) {
++			NL_SET_ERR_MSG(extack, "Nexthop id does not exist");
++			err = -EINVAL;
++			goto errout_rtnl;
++		}
++
++		tb = fib_get_table(net, cfg.fc_table);
++		if (!tb) {
++			NL_SET_ERR_MSG(extack, "FIB table does not exist");
++			err = -ESRCH;
++			goto errout_rtnl;
++		}
++
++		err = fib_table_delete(net, tb, &cfg, extack);
++		goto errout_rtnl;
++	}
+@@
++	cfg.fc_skip_notify = true;
++	bird_rtbulk_route_lock(net);
+ 	err = fib_table_delete(net, tb, &cfg, extack);
++	bird_rtbulk_route_unlock(net);
+ errout:
+ 	return err;
++errout_rtnl:
++	rtnl_unlock();
++	return err;
+ }
+@@
+ 	struct fib_table *tb;
+ 	int err;
+ 
+ 	err = rtm_to_fib_config(net, skb, nlh, &cfg, extack);
+ 	if (err < 0)
+ 		goto errout;
++
++	if (!bird_rtbulk_k3a_route_allowed(&cfg)) {
++		rtnl_lock();
++		tb = fib_new_table(net, cfg.fc_table);
++		if (!tb) {
++			err = -ENOBUFS;
++			goto errout_rtnl;
++		}
++
++		err = fib_table_insert(net, tb, &cfg, extack);
++		if (!err && cfg.fc_type == RTN_LOCAL)
++			net->ipv4.fib_has_custom_local_routes = true;
++		goto errout_rtnl;
++	}
+ 
+-	tb = fib_new_table(net, cfg.fc_table);
++	tb = fib_get_table(net, cfg.fc_table);
+ 	if (!tb) {
+-		err = -ENOBUFS;
++		err = -ESRCH;
+ 		goto errout;
+ 	}
+ 
++	cfg.fc_skip_notify = true;
++	bird_rtbulk_route_lock(net);
+ 	err = fib_table_insert(net, tb, &cfg, extack);
++	bird_rtbulk_route_unlock(net);
+@@
+ errout:
+ 	return err;
++errout_rtnl:
++	rtnl_unlock();
++	return err;
+ }
+@@
+-	rtnl_register(PF_INET, RTM_NEWROUTE, inet_rtm_newroute, NULL, 0);
+-	rtnl_register(PF_INET, RTM_DELROUTE, inet_rtm_delroute, NULL, 0);
++	rtnl_register(PF_INET, RTM_NEWROUTE, inet_rtm_newroute, NULL,
++		      RTNL_FLAG_DOIT_UNLOCKED);
++	rtnl_register(PF_INET, RTM_DELROUTE, inet_rtm_delroute, NULL,
++		      RTNL_FLAG_DOIT_UNLOCKED);
+-- 
+2.43.0

@@ -1,0 +1,61 @@
+--- reports/weekly_t_cross_validation/run_20260909_135906_004933/independent_frequency_audit_attempt_01_csv_datetime/audit_weekly_t_frequency_execution.py	2026-09-09 14:05:31.088830513 +0800
++++ scripts/audit_weekly_t_frequency_execution.py	2026-09-09 14:08:50.690290442 +0800
+@@ -44,13 +44,13 @@
+     metrics=(json.loads((folder/'metrics.json').read_text()) if (folder/'metrics.json').is_file()
+              else read_audit_csv(folder/'test_metrics.csv').iloc[0].to_dict())
+     assert len(curve)>0
+-    curve['datetime']=pd.to_datetime(curve.datetime);inventory['date']=pd.to_datetime(inventory.date)
++    curve['datetime']=pd.to_datetime(curve.datetime,format='mixed');inventory['date']=pd.to_datetime(inventory.date,format='mixed')
+     first=None;max_cash_error=0.
+     for account,table,cash_key in [('actual',events,'cash'),('baseline',base,'baseline_cash')]:
+-        table['datetime']=pd.to_datetime(table.datetime);table['signal_datetime']=pd.to_datetime(table.signal_datetime)
++        table['datetime']=pd.to_datetime(table.datetime,format='mixed');table['signal_datetime']=pd.to_datetime(table.signal_datetime,format='mixed')
+         if table.empty:
+             check_close(curve[cash_key],cfg['initial_cash'],'empty account cash');continue
+-        table['datetime']=pd.to_datetime(table.datetime);table['signal_datetime']=pd.to_datetime(table.signal_datetime)
++        table['datetime']=pd.to_datetime(table.datetime,format='mixed');table['signal_datetime']=pd.to_datetime(table.signal_datetime,format='mixed')
+         assert table.datetime.is_monotonic_increasing and (table.datetime>table.signal_datetime).all()
+         assert (table.shares.gt(0)&table.shares.mod(cfg['lot_size']).eq(0)).all()
+         assert np.isfinite(table[['price','reference_price','notional','fee','cash_after']]).all().all()
+@@ -98,7 +98,7 @@
+         if len(fragments):
+             first_fee=fragments.sell_fee if row.side=='sell' else fragments.buy_fee
+             check_close(first_fee,fragments.shares/row.shares*row.fee,'first fee allocation')
+-            assert (pd.to_datetime(fragments.second_datetime)>row.datetime).all()
++            assert (pd.to_datetime(fragments.second_datetime,format='mixed')>row.datetime).all()
+     if len(trips):
+         check_close(trips.gross_pnl,trips.shares*(trips.sell_price-trips.buy_price),'fragment gross')
+         check_close(trips.net_pnl,trips.gross_pnl-trips.buy_fee-trips.sell_fee,'fragment net')
+@@ -129,7 +129,7 @@
+ def verify_frequency_denominator(folder: Path,cfg: dict,keys: pd.DataFrame) -> dict:
+     """从原缓存当前信号键、冻结中间交易日与独立基准旧股重建分母，不调用生产helper。"""
+     selections=read_audit_csv(folder/'validation_weekly_selections.csv')
+-    for name in ['trade_week','entry_date','exit_date']:selections[name]=pd.to_datetime(selections[name])
++    for name in ['trade_week','entry_date','exit_date']:selections[name]=pd.to_datetime(selections[name],format='mixed')
+     joined=keys.merge(selections[['trade_week','symbol','entry_date','exit_date']],on=['trade_week','symbol'],how='inner',validate='many_to_one')
+     joined=joined.loc[joined.date.gt(joined.entry_date)&joined.date.lt(joined.exit_date)].copy()
+     mapping={ts:advance_minutes(advance_minutes(pd.Timestamp(ts),1),20) for ts in joined.datetime.unique()}
+@@ -137,12 +137,12 @@
+     cutoff=joined.date+pd.to_timedelta(cfg['latest_planned_recovery_time']+':00')
+     legal=joined.loc[recovery.notna()&recovery.le(cutoff)]
+     clocks=legal.groupby(['date','symbol']).agg(eligible_signal_count=('datetime','size'),first_eligible_signal=('datetime','min'),last_eligible_signal=('datetime','max')).reset_index()
+-    inv=read_audit_csv(folder/'validation_baseline/daily_inventory_audit.csv');inv['date']=pd.to_datetime(inv.date)
++    inv=read_audit_csv(folder/'validation_baseline/daily_inventory_audit.csv');inv['date']=pd.to_datetime(inv.date,format='mixed')
+     inv['eligible_t_shares']=(np.floor(inv.opening_sellable*cfg['short_t_fraction']/cfg['lot_size'])*cfg['lot_size']).astype(int)
+     expected=inv.loc[inv.eligible_t_shares.ge(cfg['lot_size']),['date','symbol','opening_sellable','eligible_t_shares']].merge(clocks,on=['date','symbol'],validate='one_to_one')
+     expected=expected.sort_values(['date','symbol']).reset_index(drop=True)
+     saved=read_audit_csv(folder/'validation_eligible_inventory_stock_days.csv')
+-    for name in ['date','first_eligible_signal','last_eligible_signal']:saved[name]=pd.to_datetime(saved[name])
++    for name in ['date','first_eligible_signal','last_eligible_signal']:saved[name]=pd.to_datetime(saved[name],format='mixed')
+     saved=saved.sort_values(['date','symbol']).reset_index(drop=True)
+     pd.testing.assert_frame_equal(expected,saved,check_dtype=False)
+     summary=json.loads((folder/'validation_frequency_opportunities.json').read_text())
+@@ -151,7 +151,7 @@
+     expected_keys=joined[['datetime','symbol']].sort_values(['datetime','symbol']).reset_index(drop=True)
+     for profile in ['l2_depth4','l2_depth6','huber_depth4']:
+         predicted=read_audit_csv(folder/f'validation_h20_{profile}_predictions.csv')[['datetime','symbol']]
+-        predicted['datetime']=pd.to_datetime(predicted.datetime)
++        predicted['datetime']=pd.to_datetime(predicted.datetime,format='mixed')
+         pd.testing.assert_frame_equal(predicted.sort_values(['datetime','symbol']).reset_index(drop=True),expected_keys,check_dtype=False)
+     return {**summary,'independently_rebuilt_from_original_cache':True,'current_signal_key_count':len(joined)}
+ 

@@ -1,0 +1,13 @@
+# 完整核心标签降重和环境/个股分解，不改变路径标签、费用、周池或退出。
+base_config: config/pathwise_year_validation.yaml
+output_dir: reports/pooled_path_year_validation
+pooled_min_label_group: 5
+pooled_model_profiles:
+  - {name: shallow, num_leaves: 7, max_depth: 3, min_child_samples: 160, n_estimators: 160, reg_lambda: 10.0}
+  - {name: regularized, num_leaves: 15, max_depth: 4, min_child_samples: 320, n_estimators: 240, reg_lambda: 20.0}
+pooled_environment_model:
+  num_leaves: 3
+  max_depth: 2
+  min_child_samples: 40
+  n_estimators: 100
+  reg_lambda: 25.0

@@ -1,0 +1,45 @@
+config_source: /data/lxl/seed-emulator/topology/quant/config/cta_validation_search.yaml
+contexts:
+- none
+- breadth
+- market_trend
+- quiet
+- avoid_chase
+exit_ids:
+- 0
+- 1
+frequencies:
+- 24
+- 120
+is_smoke: false
+minimum_closed_lots_per_fold: 20
+objectives:
+- return
+- probability
+output_dir: /data/lxl/seed-emulator/topology/quant/reports/cta_validation_search
+prediction_cache: /data/lxl/seed-emulator/topology/quant/reports/cta_validation_prediction_cache
+probability_gates:
+- 0.4
+- 0.45
+- 0.5
+- 0.55
+- 0.6
+profiles:
+- shallow
+- regularized
+return_gates:
+- -0.003
+- 0.0
+- 0.003
+- 0.006
+- 0.01
+save_every: 20
+sharpe_target: 2.0
+source_report: /data/lxl/seed-emulator/topology/quant/reports/xgb_cta_expanded/run_20260910_122142_766807
+styles:
+- trend
+- breakout
+- pullback
+- recovery
+- model_only
+workers: 12

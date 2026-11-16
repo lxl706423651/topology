@@ -1,0 +1,97 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Codex <codex@local>
+Date: Thu, 18 Jun 2026 12:25:00 +0800
+Subject: [PATCH] ipv4: add K2b no-notify per-netns bulk upper-bound mode
+
+This is the K2b experiment from bird/0618ExperimentDesign.md.
+
+It builds on the private BIRD_RT_BULK K2 path and intentionally skips IPv4 route notifier and rtnetlink multicast messages for bulk-created routes. The path still uses a private per-netns route mutex instead of global RTNL.
+
+This is not a production-safe route update model. It is a synthetic upper-bound experiment for dev-lo/blackhole routes, used to measure how much of the remaining cost is tied to global RTNL/notifier serialization versus FIB trie/fib_info work.
+
+---
+--- a/include/net/ip_fib.h
++++ b/include/net/ip_fib.h
+@@ -29,8 +29,9 @@
+ 	u8			fc_protocol;
+ 	u8			fc_scope;
+ 	u8			fc_type;
++	bool			fc_skip_notify;
+ 	u8			fc_gw_family;
+-	/* 2 bytes unused */
++	/* 1 byte unused */
+ 	u32			fc_table;
+ 	__be32			fc_dst;
+ 	union {
+--- a/net/ipv4/fib_bulk.c
++++ b/net/ipv4/fib_bulk.c
+@@ -71,6 +71,7 @@
+ 	cfg.fc_protocol = op->protocol ? op->protocol : RTPROT_STATIC;
+ 	cfg.fc_scope = op->scope;
+ 	cfg.fc_type = type;
++	cfg.fc_skip_notify = true;
+ 	cfg.fc_flags = op->flags;
+ 	cfg.fc_priority = op->metric;
+ 	cfg.fc_oif = op->ifindex;
+--- a/net/ipv4/fib_trie.c
++++ b/net/ipv4/fib_trie.c
+@@ -1297,7 +1297,8 @@
+ 
+ 			hlist_replace_rcu(&fa->fa_list, &new_fa->fa_list);
+ 
+-			if (fib_find_alias(&l->leaf, fa->fa_slen, 0, 0,
++			if (!cfg->fc_skip_notify &&
++			    fib_find_alias(&l->leaf, fa->fa_slen, 0, 0,
+ 					   tb->tb_id, true) == new_fa) {
+ 				enum fib_event_type fib_event;
+ 
+@@ -1312,8 +1313,10 @@
+ 				}
+ 			}
+ 
+-			rtmsg_fib(RTM_NEWROUTE, htonl(key), new_fa, plen,
+-				  tb->tb_id, &cfg->fc_nlinfo, nlflags);
++			if (!cfg->fc_skip_notify)
++				rtmsg_fib(RTM_NEWROUTE, htonl(key), new_fa,
++					  plen, tb->tb_id, &cfg->fc_nlinfo,
++					  nlflags);
+ 
+ 			alias_free_mem_rcu(fa);
+ 
+@@ -1368,7 +1371,8 @@
+ 		goto out_free_new_fa;
+ 	}
+ 
+-	if (fib_find_alias(&l->leaf, new_fa->fa_slen, 0, 0, tb->tb_id, true) ==
++	if (!cfg->fc_skip_notify &&
++	    fib_find_alias(&l->leaf, new_fa->fa_slen, 0, 0, tb->tb_id, true) ==
+ 	    new_fa) {
+ 		enum fib_event_type fib_event;
+ 
+@@ -1383,8 +1387,9 @@
+ 		tb->tb_num_default++;
+ 
+ 	rt_cache_flush(cfg->fc_nlinfo.nl_net);
+-	rtmsg_fib(RTM_NEWROUTE, htonl(key), new_fa, plen, new_fa->tb_id,
+-		  &cfg->fc_nlinfo, nlflags);
++	if (!cfg->fc_skip_notify)
++		rtmsg_fib(RTM_NEWROUTE, htonl(key), new_fa, plen, new_fa->tb_id,
++			  &cfg->fc_nlinfo, nlflags);
+ succeeded:
+ 	return 0;
+ 
+@@ -1743,9 +1748,11 @@
+ 	if (!fa_to_delete)
+ 		return -ESRCH;
+ 
+-	fib_notify_alias_delete(net, key, &l->leaf, fa_to_delete, extack);
+-	rtmsg_fib(RTM_DELROUTE, htonl(key), fa_to_delete, plen, tb->tb_id,
+-		  &cfg->fc_nlinfo, 0);
++	if (!cfg->fc_skip_notify) {
++		fib_notify_alias_delete(net, key, &l->leaf, fa_to_delete, extack);
++		rtmsg_fib(RTM_DELROUTE, htonl(key), fa_to_delete, plen, tb->tb_id,
++			  &cfg->fc_nlinfo, 0);
++	}
+ 
+ 	if (!plen)
+ 		tb->tb_num_default--;

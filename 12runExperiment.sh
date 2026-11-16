@@ -39,8 +39,8 @@ echo "[*] 所有日志将全局定向至: $EXP_LOG_DIR"
 echo "==================================================="
 
 # [步骤 0]
-echo -e "\n---> [0] 统计初始服务器内存"
-./0SnapHostMemory.sh
+# echo -e "\n---> [0] 统计初始服务器内存"
+# ./0SnapHostMemory.sh
 
 # [步骤 1 & 2]
 echo -e "\n---> [1-2] 构建并拉起 Docker 拓扑"
@@ -48,8 +48,8 @@ echo -e "\n---> [1-2] 构建并拉起 Docker 拓扑"
 ./dockerUp.sh
 
 # [步骤 3]
-echo -e "\n---> [3] 注入 BIRD MRT 配置"
-./3InjectMrtlog.sh
+# echo -e "\n---> [3] 注入 BIRD MRT 配置"
+# ./3InjectMrtlog.sh
 
 # # [步骤 4.a & 4.b] 启动后台监控进程
 # echo -e "\n---> [4.a/b] 启动 eBPF 和 pidstat 后台监控 (针对初始收敛)"
@@ -65,17 +65,17 @@ sudo -E python3 start_bird0130.py
 # sleep 2
 
 # [步骤 5]
-echo -e "\n---> [5] 统计收敛后内存快照"
-sudo -E python3 5MemorySnapshot.py
-./0SnapHostMemory.sh
+# echo -e "\n---> [5] 统计收敛后内存快照"
+# sudo -E python3 5MemorySnapshot.py
+# ./0SnapHostMemory.sh
 
 # [步骤 6]
-echo -e "\n---> [6] 回收 MRT 日志并清理配置"
-./6CollectMrt.sh
+# echo -e "\n---> [6] 回收 MRT 日志并清理配置"
+# ./6CollectMrt.sh
 
 # [步骤 7] 第一次震荡测试
-echo -e "\n---> [7] 注入 10 节点失效，观测原始收敛时间"
-sudo -E python3 7AutoConvergenceTest.py
+# echo -e "\n---> [7] 注入 10 节点失效，观测原始收敛时间"
+# sudo -E python3 7AutoConvergenceTest.py
 
 # # [步骤 8]
 # echo -e "\n---> [8] 重启 eBPF 和 pidstat 监控 (针对内核优化后)"
@@ -89,16 +89,16 @@ sudo -E python3 start_bird_kernel.py
 # # 清理最后残留的监控进程
 # sudo kill -INT $PROFILER_PID_2
 # [步骤 10]
-echo -e "\n---> [10] 统计内核优化后的内存快照"
-# sudo -E python3 5MemorySnapshot.py
-./0SnapHostMemory.sh
+# echo -e "\n---> [10] 统计内核优化后的内存快照"
+# # sudo -E python3 5MemorySnapshot.py
+# ./0SnapHostMemory.sh
 
-# [步骤 10.5] 生成iperf pair
-sudo python3 0preGenerateIperfPairs.py -n $iperfPairNum
+# # [步骤 10.5] 生成iperf pair
+# sudo python3 0preGenerateIperfPairs.py -n $iperfPairNum
 
-# [步骤 11]
-echo -e "\n---> [11] 启动 iperf 并发吞吐量测试"
-sudo -E python3 8IperfTest.py -t 10 -u_bw 20M
+# # [步骤 11]
+# echo -e "\n---> [11] 启动 iperf 并发吞吐量测试"
+# sudo -E python3 8IperfTest.py -t 10 -u_bw 20M
 
 # # [步骤 12] 第二次震荡测试
 # echo -e "\n---> [12] 再次注入 10 节点失效，观测优化后收敛时间"
@@ -108,6 +108,3 @@ echo -e "\n==================================================="
 echo "[✅] 实验完美结束！"
 echo "所有多维度数据已封存于: $EXP_LOG_DIR"
 echo "==================================================="
-
-docker stop seedemu_internet_map
-cd ~/seed-emulator1211/tools/InternetMap2 && dcbuild && docker compose up -d

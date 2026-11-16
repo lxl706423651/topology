@@ -30,134 +30,6 @@ def get_assignment(asn,assignment=assignment):
     if asn not in assignment.keys():
         assignment[asn]={'asn':t+1,'ipv4':f'{(t+1) //256}.{(t+1) %256}.0.0/16'}
     return assignment
-def update_topology_from_file(TOPOLOGY_DATA,max_new_asns=100):
-    """
-    从文件中读取数据更新拓扑
-    :param max_new_asns: 允许新增的最大 AS 数量
-    """
-    
-    db_filename = '201603modified.txt'
-    
-    print(f"正在分析未使用的 IXP... (最大新增 AS 限制: {max_new_asns})")
-
-    # 2. 找出不存在于 as_as_ix_edges 中的 IXP
-    # as_as_ix_edges 结构: [(as1, as2, ixp, rel), ...] -> ixp 是第3个元素 (index 2)
-    used_ixps = set(edge[2] for edge in TOPOLOGY_DATA['as_as_ix_edges'])
-    # 筛选未使用的 IXP
-    unused_ixps = [ixp for ixp in TOPOLOGY_DATA['ixps'] if ixp not in used_ixps]
-    
-    if not unused_ixps:
-        print("未发现未使用的 IXP，无需更新。")
-        return TOPOLOGY_DATA
-
-    # 3. 寻找未使用的 IXP 连接的 Transit AS (即变量 a)
-    # 建立映射: { Transit_AS_a: [IXP_1, IXP_2, ...] }
-    # 这样读取文件时，如果遇到 AS0 == Transit_AS_a，就可以只检查对应的几个 IXP
-    as_to_target_ixps = {}
-    
-    count_mapped = 0
-    for ixp in unused_ixps:
-        connected_as = None
-        # ix_ix_transit_edges 结构: [(ixp1, ixp2, as, 0)]
-        for edge in TOPOLOGY_DATA['ix_ix_transit_edges']:
-            ixp1, ixp2, asn, _ = edge
-            if ixp == ixp1 or ixp == ixp2:
-                # 修改点 1: 确保 asn 转换为整数
-                connected_as = int(asn)
-                break
-        
-        if connected_as is not None:
-            if connected_as not in as_to_target_ixps:
-                as_to_target_ixps[connected_as] = []
-            as_to_target_ixps[connected_as].append(ixp)
-            count_mapped += 1
-    
-    print(f"找到 {len(unused_ixps)} 个未使用 IXP，其中 {count_mapped} 个成功关联到 Transit AS。")
-    print("正在扫描 201603modified.txt 进行匹配...")
-
-    # 4. 扫描文件并查找匹配项 (a|X|ixp,-1)
-    # 缓存已存在的 Stub AS 以避免重复添加检查
-    existing_stubs = set(TOPOLOGY_DATA['stub_asns'])
-    existing_transits = set(TOPOLOGY_DATA['transit_asns'])
-    
-    new_edges_count = 0
-    added_asns_count = 0 # 修改点 2: 新增 AS 计数器
-
-    with open(db_filename, 'r', encoding='utf-8') as f:
-        for line in f:
-            # 修改点 3: 检查是否达到数量限制
-            if added_asns_count >= max_new_asns:
-                print(f"已达到最大新增 AS 数量限制 ({max_new_asns})，停止处理。")
-                break
-
-            line = line.strip()
-            # 过滤空行和注释
-            if not line or line.startswith('#'):
-                continue
-            
-            parts = line.split('|')
-            if len(parts) < 3:
-                continue
-            
-            # 获取 AS0 (即变量 a)
-            try:
-                as0 = int(parts[0])
-            except ValueError:
-                continue # 如果 AS 不是数字则跳过
-            
-            # 如果这一行的 AS0 是我们要找的 Transit AS 之一
-            if as0 in as_to_target_ixps:
-                target_ixps = as_to_target_ixps[as0]
-                
-                # 获取该行剩余部分 (loc,source...)
-                # parts[0]是AS0, parts[1]是AS1 (即变量 X), parts[2:]是位置信息
-                try:
-                    as1 = int(parts[1]) # 变量 X
-                except ValueError:
-                    continue
-
-                # 遍历该 AS 关心的所有未使用 IXP
-                for ixp in target_ixps:
-                    # 构造搜索字符串: "ixp,-1"
-                    # 注意：确保 ixp 转为字符串与文件内容匹配
-                    search_target = f"{ixp},-1"
-                    
-                    # 在剩余部分寻找匹配
-                    is_match = False
-                    for segment in parts[2:]:
-                        if search_target in segment:
-                            is_match = True
-                            break
-                    
-                    if is_match:
-                        # 5. 匹配成功，执行添加操作
-                        
-                        # 检查是否为新 AS
-                        is_new_as = as1 not in existing_stubs and as1 not in existing_transits
-
-                        if is_new_as:
-                            # 再次检查限制 (以防同一行触发多次添加，虽然这里同一行是同一个AS1)
-                            if added_asns_count >= max_new_asns:
-                                break # 跳出内层循环，外层循环会在下一次迭代时捕获并break
-
-                            TOPOLOGY_DATA['stub_asns'].append(str(as1))
-                            existing_stubs.add(as1) # 更新缓存
-                            added_asns_count += 1
-                        
-                            # 添加边 (a, X, ixp, -1) -> (as0, as1, ixp, -1)
-                            new_edge = (str(as0), str(as1), ixp, '-1')
-                            # 简单去重检查
-                            if new_edge not in TOPOLOGY_DATA['as_as_ix_edges']:
-                                TOPOLOGY_DATA['as_as_ix_edges'].append(new_edge)
-                                new_edges_count += 1
-                                # print(f"添加边: {new_edge}") 
-                
-                # 如果在内层循环触发了限制，外层也需要退出
-                if added_asns_count >= max_new_asns:
-                    break
-    
-    print(f"处理完成。新增了 {added_asns_count} 个 AS，{new_edges_count} 条 AS-AS-IX 边。")
-    return TOPOLOGY_DATA
 
 def generate_connected_pairs(nodes, extra_edges_count=0):
     """
@@ -180,22 +52,6 @@ def generate_connected_pairs(nodes, extra_edges_count=0):
         if i!= (int(i + 1+len(nodes)/2) % len(nodes)):
             pair2 = tuple(sorted((nodes[i],nodes[int(i + 1+len(nodes)/2) % len(nodes)])))
             pairs.add(pair2)
-    
-    # # 3. (可选) 添加额外的随机边，增加网络复杂度
-    # # 如果您只需要最基本的连通，可以让 extra_edges_count = 0
-    # current_edge_count = len(pairs)
-    # max_edges = len(nodes) * (len(nodes) - 1) // 2 # 全连接图的边数
-    
-    # # 防止请求的额外边数超过最大可能的边数
-    # target_count = min(current_edge_count + extra_edges_count, max_edges)
-    
-    # while len(pairs) < target_count:
-    #     # 随机选两个不同的节点
-    #     u, v = random.sample(nodes, 2)
-    #     pair = tuple(sorted((u, v)))
-        
-    #     # 集合会自动去重，如果该边已存在则不会添加
-    #     pairs.add(pair)
 
     return list(pairs)
 
@@ -313,7 +169,6 @@ def run(dumpfile=None, hosts_per_as=2):
     try:
         TOPOLOGY_DATA = load_topology_data(f'real_topology_{x}.txt')
         #TOPOLOGY_DATA = load_topology_data('real_topology_1897.txt')
-        #TOPOLOGY_DATA = update_topology_from_file(TOPOLOGY_DATA,max_new_asns=100)
     except FileNotFoundError:
         print(f"错误: 未找到real_topology_{x}.txt文件")
         sys.exit(1)

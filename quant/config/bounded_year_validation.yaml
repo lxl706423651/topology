@@ -1,0 +1,4 @@
+# 数据来源修正，不从外层收益改模型/费用/门控网格；旧缓存不覆盖。
+base_config: config/multiscale_year_validation.yaml
+output_dir: reports/bounded_year_validation
+bounded_cache_dir: reports/bounded_year_validation/cache

@@ -1,0 +1,270 @@
+\documentclass[UTF8]{ctexart}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\method}[1]{\textsc{#1}}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  columns=fullflexible,
+  frame=single,
+  backgroundcolor=\color{gray!5}
+}
+
+\title{Deferred FIB Update and Namespace-Aware Route Installation}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{问题背景}
+
+在大规模 SeedEMU 仿真中，控制面和数据面收敛存在明显的解耦空间。BIRD 可以先通过 BGP/OSPF 等协议完成 RIB 收敛；真正造成长尾和拥塞的，往往是大量 router 容器几乎同时通过 BIRD kernel protocol 把 selected routes 写入 Linux main FIB。虽然这些 router 位于不同的 network namespace，它们的 route update 最终仍然进入同一宿主机内核中的 rtnetlink/FIB 路径，并竞争 global RTNL lock 以及若干共享 FIB metadata。因此，数据面 FIB 安装会在大规模场景中出现严重长尾，甚至表现为长时间不能稳定收敛。
+
+一个直接的 Deferred Kernel Update 思路是修改或配置 BIRD 的 kernel protocol：先关闭或限制 kernel export，待 RIB 稳定后，再按固定间隔逐个容器切换 kernel protocol，使其把 RIB 导出到 FIB。这个策略可以避免控制面尚未稳定时的写者风暴，但它仍然存在两个结构性缺陷。
+
+\begin{enumerate}[leftmargin=1.5em]
+  \item \textbf{固定间隔无法适配异构路由规模。} 不同 router 的 RIB/FIB 规模差异很大。若统一设置串行间隔，route 数少的容器会造成空等；route 数多的容器可能在下一批触发时尚未完成安装，使后续容器再次并发进入内核 route update 路径，重新竞争 RTNL/FIB 共享资源。
+  \item \textbf{BIRD kernel protocol 仍是细粒度 route update。} 即使容器启动顺序被调度得更温和，每条 route 仍然以 \code{RTM\_NEWROUTE} 或 \code{RTM\_DELROUTE} 的形式进入 Linux rtnetlink/FIB 更新路径。换言之，固定间隔只能控制``谁先写''，不能改变``内核如何处理每条 route''。
+\end{enumerate}
+
+因此，我们将问题拆解为两个层次：第一，在用户态避免无序的容器级写者风暴；第二，在内核态提供更适合大规模 namespace 仿真的批量化、namespace-aware FIB update primitive。
+
+\section{F 方法：用户态集中调度}
+
+\method{F} 方法保留 stock Linux kernel，不修改内核。其核心思想是把容器内 BIRD kernel protocol 的即时写入，替换为 host/controller 侧的集中调度。具体流程如下：
+
+\begin{lstlisting}
+BIRD RIB converges
+  -> host enters each router netns
+  -> birdc show route primary
+  -> parse selected routes and nexthops
+  -> generate ip route replace/del commands
+  -> ip -force -batch - writes the main FIB
+\end{lstlisting}
+
+相比固定间隔切换 BIRD kernel protocol，\method{F} 方法具有三个优势。首先，controller 可以先读取每个 router 的 selected routes，从而知道每个 namespace 的实际 FIB 安装工作量，而不是按容器数量盲目分配时间。其次，controller 可以显式控制 writer 并发数、batch size 和 batch sleep，使系统以较稳定的速率执行 route updates。最后，在故障后，若 BIRD 能提供 selected-route change events，controller 可以只写入变化后的 delta route ops，而不是每次重新 full dump 和 full install。
+
+然而，\method{F} 方法只能缓解写者风暴，不能消除 Linux route update primitive 本身的细粒度开销。3083 规模实验中，故障后的 full \code{birdc show route primary} dump 仅需 $15.732$ s，而对 $6.10$M route ops 执行 FIB 写入需要 $2025.107$ s。这说明瓶颈已经从``如何获取 RIB''转移到``Linux 如何执行大批量 FIB updates''。
+
+\section{K1：Global-RTNL Bulk Route API}
+
+\method{K1} 在 \method{F} 框架基础上修改内核，引入受控的 \code{BIRD\_RT\_BULK} generic-netlink API。用户态不再为每条 route 单独发送标准 \code{RTM\_NEWROUTE}/\code{RTM\_DELROUTE}，而是把一批 route ops 一次提交给内核。内核在处理一个 batch 时只获取一次 RTNL lock，然后在同一个临界区内串行执行 FIB insert/delete：
+
+\begin{lstlisting}
+user batch
+  -> BIRD_RT_BULK request
+  -> rtnl_lock()
+  -> for op in batch: fib_table_insert/delete
+  -> rtnl_unlock()
+\end{lstlisting}
+
+\method{K1} 减少了三类开销：用户态/内核态 netlink 往返和消息解析开销；每条 route 重复获取/释放 RTNL lock 的开销；高频 netlink ACK、调度切换和 lock handoff 带来的尾延迟。实验结果表明，batching 本身具有价值。
+
+但是，\method{K1} 的同步域仍然是 global RTNL。不同 network namespace 的 route updates 仍被同一个全局锁串行化。因此，\method{K1} 可以证明 bulk API 有价值，但无法释放跨 namespace 的并行性。
+
+\section{K2c：Per-NS Route Lock with Shared FIB Protection}
+
+从仿真语义看，不同 router 容器位于不同 network namespace，它们的 main FIB 应当相互独立。因此，我们进一步在 \method{K1} bulk API 上拆分同步域：将受控 bulk path 的 route update lock 从 global RTNL 降为 per-network-namespace route lock。
+
+粗暴拆锁会立即暴露两个问题。第一，route notifier 仍然要求 RTNL。K2 smoke test 中，即使只通过 bulk path 写入一条 route，也会触发：
+
+\begin{lstlisting}
+RTNL: assertion failed at net/ipv4/fib_notifier.c (22)
+WARNING ... call_fib4_notifiers
+fib_table_insert -> bird_rtbulk_apply_one_v4
+\end{lstlisting}
+
+这说明 \code{fib\_table\_insert()} 后续的 route notifier/rtnetlink multicast 路径仍然假设调用者持有 global RTNL。
+
+第二，\code{fib\_info} 并非纯 per-netns 私有对象。我们使用 \code{--metric-step 1} 构造大量唯一 \code{fib\_info}，在 $32 \times 200$K 并发压力下复现：
+
+\begin{lstlisting}
+general protection fault ... 0xdead000000000152
+RIP: fib_create_info+0x803/0x1080
+fib_create_info -> fib_table_insert -> bird_rtbulk_apply_one_v4
+\end{lstlisting}
+
+这说明 \code{fib\_info\_hash}、\code{fib\_info\_laddrhash}、\code{fib\_info\_cnt}、\code{fib\_find\_info()}、\code{fib\_info\_hash\_move()} 和 \code{fib\_release\_info()} 等共享结构在 upstream Linux 中依赖 RTNL 进行更大范围的串行化。只给每个 netns 一个独立 route lock，不足以保护这些跨 namespace 共享的 FIB metadata。
+
+\method{K2c} 因此采用三部分设计，如表~\ref{tab:k2c-components} 所示。
+
+\begin{table}[t]
+\centering
+\small
+\caption{\method{K2c} 的组成及其必要性。}
+\label{tab:k2c-components}
+\begin{tabularx}{\textwidth}{p{0.24\textwidth}YY}
+\toprule
+\textbf{组件} & \textbf{作用} & \textbf{原因} \\
+\midrule
+per-NS route lock &
+允许不同 netns 的 bulk route update 并行进入 FIB 更新路径 &
+解除 global RTNL 对独立 namespace route tables 的过度串行化。 \\
+\code{no-notify} &
+bulk fast path 暂时跳过 route notifier/rtnetlink multicast &
+notifier 路径仍要求 RTNL；不跳过会触发 \code{ASSERT\_RTNL()}。 \\
+\code{fib\_info\_hash\_mutex} &
+串行保护 \code{fib\_info} hash/list/refcount 相关路径 &
+\code{fib\_info} 是共享结构；粗暴 per-NS lock 会导致 \code{fib\_create\_info()} Oops。 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\method{K2c} 的本质是：把真正 per-namespace 的 route table update 并行化，同时保留对跨 namespace 共享 FIB metadata 的串行保护。它不是完整 production 语义，因为 \code{no-notify} 会让 \code{ip monitor route} 和依赖 rtnetlink multicast 的用户态组件看不到 bulk route changes；但作为受控仿真 fast path，它明确证明 global RTNL 是跨 namespace route update 的结构性瓶颈。
+
+\section{K3c：Cached \texorpdfstring{\code{fib\_info}}{fib\_info} Fast Path}
+
+\method{K2c} 之后，新的瓶颈变成每条 route 反复执行 \code{fib\_create\_info()} 及其查找/链接逻辑。真实 SeedEMU route 中，许多 route 共享相同 nexthop、device、metric、protocol 和 table，只有 prefix 不同。\method{K3c} 利用这一点，把同一批共享 FIB key 的 route ops 分组：
+
+\begin{lstlisting}
+group routes by nexthop/device/metric/proto/table
+  -> fib_create_info(base_cfg) once
+  -> fib_table_insert_info(prefix_i, cached_fi) for each route
+\end{lstlisting}
+
+该 fast path 避免了每条 route 重复创建/查找相同 \code{fib\_info} 的成本。在 3083 规模下，\method{K3c} 将 initial full FIB writer 从 \method{K2c} 的 $71.162$ s 降到 $10.226$ s，其中真实 kernel write 只有 $7.668$ s。
+
+\method{K3c} 也暴露了新的工程边界。第一，它仍沿用 \method{K2c} 的 \code{no-notify}，因此 route monitor 可见性不是完整 Linux 语义。第二，cached \code{fib\_info} fast path 对引用计数和 netdevice lifetime 更敏感；实验中观察过 \code{unregister\_netdevice: waiting ... Usage count = ...} 这类 teardown warning。后续 fibref 修复通过在 cached \code{fib\_info} 被 alias 持有前补齐引用计数来降低该风险。因此，\method{K3c} 应定位为 controlled kernel prototype：它证明 missing primitive 的性能上限，但要成为 production/upstream 方案，还需要补齐 batched notifier、复杂 route fallback、netdevice/netns 生命周期审计和更完整回归测试。
+
+\section{3083 规模实验结果}
+
+实验对象为 3083 output，实际 compose services 为 3085，brdnode containers 约 2757。initial full FIB 写入规模为 6,131,994 route ops。reconvergence 实验停止 10 个 brdnode 后，delta route ops 约为 198K--561K，具体数量取决于 FIB writer 和 delta event 版本。
+
+\subsection{Initial Full FIB Installation}
+
+表~\ref{tab:initial-full} 给出 initial full FIB installation 的对比。Stock BIRD kernel protocol 是原始问题基线：大量 BIRD 实例直接写 FIB 会导致 RTNL storm，未得到可与后续方法公平比较的稳定 3083 writer-time run。
+
+\begin{table}[t]
+\centering
+\small
+\caption{3083 规模下 initial full FIB installation 对比。}
+\label{tab:initial-full}
+\begin{tabularx}{\textwidth}{p{0.20\textwidth}YrrrY}
+\toprule
+\textbf{方法} & \textbf{路径} & \textbf{Route ops} & \textbf{Writer} & \textbf{Write} & \textbf{结果} \\
+ & & & \textbf{wall time} & \textbf{breakdown} & \\
+\midrule
+Stock BIRD &
+BIRD kernel protocol 直接写 FIB &
+N/A & N/A & N/A &
+RTNL storm baseline，未稳定完成。 \\
+\method{F}-full &
+stock kernel, host \code{setns + ip -batch} &
+6,131,994 & 518.714 s & included &
+成功。 \\
+\method{K1} &
+global-RTNL bulk API &
+6,131,994 & 402.388 s & dump 2.214 s; write 400.173 s &
+成功。 \\
+\method{K2c} &
+per-NS lock + \code{no-notify} + \code{fib\_info} mutex &
+6,131,994 & 71.162 s & dump 2.235 s; write 68.922 s &
+成功。 \\
+\method{K3c} &
+\method{K2c} + cached \code{fib\_info} &
+6,131,994 & 10.226 s & dump 2.554 s; write 7.668 s &
+成功。 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+以 \method{F}-full 为用户态 baseline，initial full writer speedup 分别为：\method{K1} 为 $1.29\times$，\method{K2c} 为 $7.29\times$，\method{K3c} 为 $50.72\times$。这组 ablation 表明，性能提升并非来自单一优化，而是来自三个缺失 primitive 的逐步补齐：bulk route submission、namespace-aware route serialization 和 batched/cached FIB object construction。
+
+\subsection{Post-Fault Reconvergence}
+
+表~\ref{tab:reconv} 给出故障后的 reconvergence FIB update 对比。这里的 writer wall time 只统计 route ops 写入 FIB 的时间；端到端 pipeline 还包括停止 victim、等待 RIB/load 稳定、delta discovery/collapse 和验证。
+
+\begin{table}[t]
+\centering
+\small
+\caption{3083 规模下故障后 FIB update 对比。}
+\label{tab:reconv}
+\begin{tabularx}{\textwidth}{p{0.18\textwidth}YrrY}
+\toprule
+\textbf{方法} & \textbf{Route discovery} & \textbf{Ops} & \textbf{FIB writer} & \textbf{Pipeline/total} \\
+ & & & \textbf{wall time} & \\
+\midrule
+Stock BIRD &
+BIRD kernel protocol 自行触发 &
+N/A & N/A &
+大规模下不可稳定对照。 \\
+\method{F}-delta &
+BIRD delta event + \code{ip -batch} &
+561,377 & 238.320 s &
+dump 6.434 s + write 238.320 s。 \\
+\method{F}-full post-fault &
+full \code{birdc show route primary} + \code{ip -batch} &
+6,097,653 & 2025.107 s &
+dump 15.732 s + write 2025.107 s。 \\
+\method{K1} delta &
+BIRD delta event + global-RTNL bulk &
+198,804 & 63.639 s &
+622.785 s total; dominated by offset preparation. \\
+\method{K2c} delta &
+BIRD delta event + per-NS bulk &
+198,869 & 55.026 s &
+157.028 s total。 \\
+\method{K3c} delta &
+BIRD delta event + cached \code{fib\_info} bulk &
+198,832 & 6.386 s &
+41.922 s total。 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+以 \method{F}-delta 的 FIB writer 为 baseline，\method{K1}、\method{K2c} 和 \method{K3c} 的 delta writer speedup 分别为 $3.74\times$、$4.33\times$ 和 $37.32\times$。同时，\method{F}-full post-fault 对照表明，full RIB dump 并非主要瓶颈：dump 仅需 $15.732$ s，而 FIB write 需要 $2025.107$ s。
+
+\section{讨论与论文结论}
+
+这组实验支持三个层次的结论。
+
+\textbf{第一，Deferred Kernel Update 必须从时间调度升级为工作量感知调度。}
+固定间隔切换 BIRD kernel protocol 无法适配不同容器 RIB/FIB 规模差异；\method{F} 方法通过先读取 selected routes，再集中生成和调度 FIB ops，避免了无序写者风暴。
+
+\textbf{第二，用户态调度只能缓解 RTNL storm，不能消除 Linux route update primitive 的低效。}
+\method{F}-full 在 3083 initial full 中仍需要约 $519$ s；故障后如果 full 重写，FIB write 需要 $2025$ s，而 full RIB dump 仅 $15.7$ s。这说明瓶颈不是 BIRD RIB 可见性，而是内核 FIB update API 和同步粒度。
+
+\textbf{第三，内核原型的 ablation 证明了缺失 primitive 的具体形态。}
+\method{K1} 说明 bulk route API 可以减少 netlink/lock 往返；\method{K2c} 说明 global RTNL 对独立 netns route updates 是过度串行化；\method{K3c} 说明 \code{fib\_info} 创建/查找也需要批处理和复用。\method{K3c} 将 3083 initial full FIB writer 从 \method{F}-full 的 $518.714$ s 降到 $10.226$ s，并将故障后的 delta writer 从 $238.320$ s 降到 $6.386$ s。这不是普通参数调优，而是 API 粒度和内核同步域不匹配导致的数量级差异。
+
+上述结果可以概括为如下论文观点：
+
+\begin{quote}
+We first decouple control-plane convergence from data-plane FIB installation.
+Then, we show that user-space scheduling alone is insufficient because Linux
+still exposes route updates as fine-grained rtnetlink operations serialized by
+global kernel state. Our kernel prototypes progressively isolate the missing
+primitives: bulk route submission, namespace-aware route serialization, and
+batched FIB object construction.
+\end{quote}
+
+最后需要明确边界：\method{K2c}/\method{K3c} 当前是 controlled prototypes，而不是通用 Linux networking 替代品。特别是 \code{no-notify} 会影响 route monitor 可见性；IPv6、ECMP、nexthop object、VRF、policy routing 和 netdevice teardown 仍需进一步审计。其论文价值在于证明大规模 network namespace 仿真需要新的 kernel FIB update primitive，并量化该 primitive 可以带来的数量级收益。
+
+\section{数据来源}
+
+本文中的实验数据来自以下本地实验目录：
+
+\begin{itemize}[leftmargin=1.5em]
+  \item \method{F} 3083 strict delta/full: \code{bird/runs/strict\_delta\_full\_3083\_20260617\_090018}
+  \item \method{F} multi-scale: \code{bird/runs/F\_reconf\_multiscale\_20260614\_094101/scale\_3083}
+  \item \method{K1} 3083: \code{bird/runs/k1-delta-reconv-3083\_safej1\_20260619\_194605}
+  \item \method{K2c} 3083 mixed: \code{bird/runs/k2c-delta-mixed-3083\_20260620\_1150}
+  \item \method{K3c} 3083 rerun: \code{bird/runs/k3c-rerun-3083\_20260701\_114246}
+  \item K2 brutal split failure reproduction: \code{bird/runs/k2\_brutal\_repro\_20260705}
+  \item K2b unsafe upper-bound: \code{bird/runs/k2b-unsafe-3083\_20260705\_114753}
+\end{itemize}
+
+\end{document}
+

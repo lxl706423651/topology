@@ -1,0 +1,88 @@
+# Python cache/runtime
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.coverage
+htmlcov/
+
+# Local environments and secrets
+.env
+.env.*
+venv/
+.venv/
+*.log
+
+# Market data and derived data
+ashare_minute_data_2023_2026_04/*
+!ashare_minute_data_2023_2026_04/README_DATA_ANALYSIS.md
+!ashare_minute_data_2023_2026_04/README_FEATURES.md
+
+# Generated caches, model artifacts, and binary data
+*.pkl
+*.joblib
+*.pt
+*.parquet
+*.feather
+*.zip
+
+# Reports are tracked by default so lightweight summaries can be pushed
+# without adding per-report whitelists. Ignore only bulky caches and raw
+# prediction/detail tables that are reproducible or too large for Git.
+reports/feature_panel_cache/
+# 三板块CTA分钟报价与历史状态缓存很大，中文摘要和年度报告仍默认可跟踪。
+reports/xgb_cta_cache/
+# 第七方法的大缓存、流程烟测和逐行训练审计仅本地保存；正式指标/曲线/模型参数仍可提交。
+reports/xgb_cta_expanded_cache/
+reports/xgb_cta_expanded_smoke/
+reports/cta_validation_prediction_cache/
+reports/cta_validation_search_smoke/
+reports/xgb_cta_expanded/run_*/**/training_rows.csv
+reports/xgb_cta_walk_forward_smoke/
+reports/xgb_cta_walk_forward/run_*/year_*/models/*/training_rows.csv
+reports/xgb_cta_walk_forward/run_*/deployment_candidate/training_rows.csv
+*.nbc
+*.nbi
+reports/**/panel_cache/
+reports/**/cache/
+reports/weekly_high_vol_exit_strategy_backtests_smoke/
+reports/weekly_high_vol_lot_exit_backtests_smoke/
+reports/inventory_t_cross_validation_smoke/
+reports/weekly_t_cross_validation_smoke/
+reports/weekly_t_data_smoke_cache/
+reports/weekly_t_recovery_data_smoke_cache/
+reports/weekly_t_cross_validation/recovery_cache/
+reports/weekly_t_cross_validation/run_*/year_*/t_predictions.csv
+reports/weekly_t_cross_validation/run_*/year_*/weekly_predictions.csv
+reports/annual_method_validation_smoke/
+reports/learned_exit_year_validation_smoke/
+reports/multiscale_year_validation_smoke/
+reports/exit_alignment_year_validation_smoke/
+reports/bounded_year_validation_smoke/
+reports/simple_signal_year_validation_smoke/
+reports/pathwise_year_validation_smoke/
+reports/pooled_path_year_validation_smoke/
+reports/family_selected_path_validation_smoke/
+reports/original_method_year_validation_smoke/
+reports/pathwise_year_validation/cache_smoke/
+reports/bounded_year_validation/cache_smoke/
+reports/**/test_predictions.csv
+reports/**/validation_predictions.csv
+reports/**/train_predictions_sample.csv
+reports/**/factor_symbol_metrics.csv
+reports/**/daily_size_features.csv
+reports/**/daily_volatility_metrics.csv
+reports/**/dynamic_universe_membership.csv
+reports/real_data_smoke_bollinger/bars_with_signals.csv
+
+# Some all-A strategy detail tables can be tens of MB. Keep their summaries,
+# configs, reports, charts, and metrics tracked, but leave these drill-down
+# tables local unless explicitly needed.
+reports/all_a_small_cap_backtest/run_*/test_holdings.csv
+reports/all_a_small_cap_model_backtest/run_*/test_holdings.csv
+reports/all_a_small_cap_model_backtest/run_*/test_trade_events.csv
+reports/all_a_small_cap_model_backtest/run_*/test_round_trips.csv
+reports/all_a_small_cap_regime_backtest/run_*/test_holdings.csv

@@ -1,0 +1,63 @@
+data_root: /data/lxl/seed-emulator/topology/quant/ashare_minute_data_2023_2026_04/extracted
+output_dir: /data/lxl/seed-emulator/topology/quant/reports/xgb_cta_walk_forward_smoke
+cache_dir: /data/lxl/seed-emulator/topology/quant/reports/xgb_cta_cache
+reuse_factor_cache: /data/lxl/seed-emulator/topology/quant/reports/annual_method_validation/panel_cache/282322e813cbf3c6
+start_date: '2023-01-01'
+end_date: '2026-04-30'
+test_years:
+- 2023
+- 2024
+- 2025
+- 2026
+workers: 12
+download_workers: 4
+network_timeout: 30
+max_symbols: 3
+universe_size: 9
+min_week_days: 3
+base_signal_minutes: 24
+entry_minutes_candidates:
+- 240
+entry_styles:
+- trend
+net_return_gates:
+- 0.0
+minimum_history_days: 60
+atr_days: 14
+max_features: 16
+feature_min_coverage: 0.8
+feature_max_correlation: 0.9
+labels_per_symbol_day: 2
+initial_cash: 1000000.0
+entry_top_n: 5
+entry_equity_fraction: 0.1
+max_symbol_exposure: 0.2
+max_total_exposure: 0.8
+commission_rate: 0.0008
+min_commission: 0.0
+transfer_rate: 1.0e-05
+stamp_rate_before_20230828: 0.001
+stamp_rate_from_20230828: 0.0005
+slippage_rate: 0.0005
+max_bar_amount_fraction: 0.05
+minimum_signal_amount: 200000.0
+validation_min_closed_lots: 0
+benchmark_symbol: sh.000300
+regime_lookback_days: 60
+regime_return_threshold: 0.05
+sharpe_target: 3.0
+fit_deployment_model: true
+random_seed: 42
+exit_profiles:
+- name: atr2_trail3_time5
+  initial_atr: 2.0
+  trailing_atr: 3.0
+  max_days: 5
+  trend_exit: true
+model_profiles:
+- name: shallow
+  n_estimators: 8
+  max_depth: 3
+  min_child_weight: 60
+  reg_lambda: 12.0
+is_smoke: true

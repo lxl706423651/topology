@@ -1,0 +1,112 @@
+# 永久底仓实际旧股训练队列；6核心回归模型，37内部候选，统一冻结后达标才外评。
+research_version: inventory_learning_t_v14
+data_root: ashare_minute_data_2023_2026_04/extracted
+market_cache_dir: reports/weekly_t_cross_validation/cache/weekly_t_9b6b9bfb3309dd53
+source_audit_report_dir: reports/weekly_t_cross_validation/run_20260909_182945_388303
+source_training_report_dir: reports/weekly_t_cross_validation/run_20260908_235818_404243
+frozen_selection_report_dir: reports/weekly_t_cross_validation/run_20260908_212722_188543
+output_dir: reports/inventory_learning_t
+start_date: '2023-01-01'
+end_date: '2026-04-30'
+test_years:
+- 2023
+- 2024
+- 2025
+- 2026
+initial_cash: 1000000
+base_fraction: 0.85
+min_position_notional: 10000
+target_position_notional: 15000
+max_position_notional: 20000
+max_cycles_per_day: 0
+manual_buys_csv: null
+lot_size: 100
+commission_rate: 0.0008
+min_commission: 0.0
+transfer_rate: 1.0e-05
+stamp_rate_before_20230828: 0.001
+stamp_rate_from_20230828: 0.0005
+slippage_rate: 0.0005
+max_bar_amount_fraction: 0.05
+repurchase_buffer: 0.12
+flat_st_limit_rate: 0.05
+nonflat_limit_proxy: 0.098
+t_avoid_locked_exit_side: true
+max_pending_t_notional_fraction: 0.2
+last_entry_time: '14:30'
+fixed_recovery_time: '14:55'
+use_minute_recovery: true
+signal_times:
+- 09:35
+- 09:45
+- '10:00'
+- '10:30'
+- '11:00'
+- '13:05'
+- '13:30'
+- '14:00'
+horizons:
+- 20
+- 40
+- 60
+t_trade_fractions:
+- 0.5
+- 1.0
+candidate_activation_policy: best_execution_valid_active
+profit_target_rate: 0.05
+minimum_completed_pair_lots: null
+minimum_active_stock_days: null
+report_scope: formal
+candidate_workers: 6
+max_symbols: 0
+smoke_days: 0
+random_state: 42
+dense_recovery_cache_paths:
+  '2023': reports/weekly_t_cross_validation/dense_quote_cache/2023/dense_recovery_d4bad42732259734d82b931a6529d9243bad232118a1ffcbba6446e2df505322
+  '2024': reports/weekly_t_cross_validation/dense_quote_cache/2024/dense_recovery_de8f52a37e2878c537840350d68c421dcc1e98ce4248294fff7c170b733e5bcd
+  '2025': reports/weekly_t_cross_validation/dense_quote_cache/2025/dense_recovery_765fb632bdf360f430ea699feaee517723959be746225d70288a096c1bd2cec6
+  '2026': reports/weekly_t_cross_validation/dense_quote_cache/2026/dense_recovery_7d3a743526d117e0bf0b8928fef2fea659d2967a65a004a74f1930bcf7e6cb22
+full_minute_cache_dir: reports/dynamic_inventory_t/full_minute_cache
+dynamic_exit_modes:
+- fixed
+- profit_buffer
+- profit_buffer_stop
+dynamic_take_net_return: 0.003
+dynamic_stop_net_return: 0.01
+min_history_days: 20
+min_avg_daily_amount: 50000000
+min_price: 3.0
+top_n: 100
+weekly_top_n: 100
+weekly_return_weight: 0.7
+weekly_amplitude_weight: 0.3
+weekly_max_features: 60
+t_max_features: 60
+feature_min_coverage: 0.8
+feature_max_correlation: 0.95
+feature_selection_sample_rows: 20000
+min_training_rows: 100
+embargo_days: 7
+exclude_flat_signal_bars: false
+workers: 12
+add_session_context: true
+use_weekly_execution_features: true
+min_prior_close_auction_amount: 500000
+strict_feature_provenance: true
+excluded_model_features:
+- f_history_days
+t_model:
+  n_estimators: 300
+  learning_rate: 0.04
+  min_child_samples: 500
+  reg_lambda: 20.0
+  verbosity: -1
+learning_model_profiles:
+- l2_depth4
+- l2_depth6
+learning_min_net_edges:
+- 0.0
+- 0.001
+- 0.003
+t_max_train_rows: 0
+outer_t_refit: false

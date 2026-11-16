@@ -1,0 +1,29 @@
+#cloud-config
+hostname: bird-rtnl-dev
+manage_etc_hosts: true
+
+users:
+  - default
+  - name: lxl
+    gecos: lxl
+    groups: [adm, sudo]
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    lock_passwd: true
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILwo87U0evDn+O/rCMToILs4aMXo6L/opB5sX8nvkHDU 706423651@qq.com
+
+ssh_pwauth: false
+disable_root: false
+package_update: false
+package_upgrade: false
+
+growpart:
+  mode: auto
+  devices: ['/']
+
+resize_rootfs: true
+
+runcmd:
+  - [sh, -c, "echo 'bird-rtnl-dev VM ready for BIRD/RTNL experiments.' > /etc/motd"]
+

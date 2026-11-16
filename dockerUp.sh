@@ -4,13 +4,19 @@
 start_time=$(date +%s)  # 以秒为单位记录开始时间
 
 # --- 核心配置 ---
-COMPOSE_FILE="./output/docker-compose.yml"
-PARALLEL_JOBS=4
-BATCH_SIZE=50
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+COMPOSE_FILE="${1:-${DOCKER_UP_COMPOSE_FILE:-$SCRIPT_DIR/output_3083/docker-compose.yml}}"
+PARALLEL_JOBS="${DOCKER_UP_PARALLEL_JOBS:-8}"
+BATCH_SIZE="${DOCKER_UP_BATCH_SIZE:-50}"
+
+if [ ! -f "$COMPOSE_FILE" ]; then
+    echo "ERROR: Compose file not found: $COMPOSE_FILE" >&2
+    exit 1
+fi
 
 # --- 日志配置（新增）---
 # 定义日志目录
-BASE_DIR="${EXP_LOG_DIR:-./logs}"
+BASE_DIR="${EXP_LOG_DIR:-$SCRIPT_DIR/logs}"
 
 # 例如内存脚本可以这样写：
 LOG_DIR="$BASE_DIR/dockerBuild"
@@ -52,8 +58,9 @@ export DOCKER_BUILDKIT=0
 
 # 执行批量启动，并将执行过程的输出也写入日志（新增）
 log_output "开始执行 docker compose up -d 批量命令..."
-echo "$SERVICES_LIST" | xargs -n $BATCH_SIZE -P $PARALLEL_JOBS \
-    docker compose -f "$COMPOSE_FILE" up -d >> "$LOG_FILE" 2>&1
+echo "$SERVICES_LIST" | xargs -n "$BATCH_SIZE" -P "$PARALLEL_JOBS" \
+    docker compose -f "$COMPOSE_FILE" up -d --no-build >> "$LOG_FILE" 2>&1
+up_rc=$?
 
 log_output "-------------------------------------"
 log_output "All build batches finished."
@@ -72,3 +79,8 @@ log_output "-------------------------------------"
 log_output "$runtime_msg"
 log_output "===== Docker Compose Up 批量启动脚本结束 ====="
 log_output "完整日志文件路径: $LOG_FILE"
+
+if [ "$up_rc" -ne 0 ]; then
+    log_output "ERROR: One or more Docker Compose startup batches failed (rc=$up_rc)."
+    exit "$up_rc"
+fi

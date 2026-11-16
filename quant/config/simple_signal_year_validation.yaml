@@ -1,0 +1,13 @@
+# 低维模型研究：继承有界数据契约，不改原缓存和历史策略。
+base_config: config/bounded_year_validation.yaml
+output_dir: reports/simple_signal_year_validation
+simple_horizons: [1, 3, 5]
+ridge_penalties: [0.01, 0.1, 1.0]
+isotonic_families: [oversold_reversal, pullback_trend, trend_breakout]
+isotonic_bins: 10
+simple_min_training_rows: 100
+simple_min_positive_segments: 2
+simple_shortlist: 3
+simple_exits:
+  - {name: matched_horizon, exit_mode: matched_horizon, initial: 20.0, trailing: 40.0, max_days: 0}
+  - {name: atr_trailing, exit_mode: atr_trailing, initial: 20.0, trailing: 40.0, max_days: 20}

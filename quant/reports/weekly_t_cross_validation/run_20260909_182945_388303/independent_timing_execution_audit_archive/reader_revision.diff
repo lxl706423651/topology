@@ -1,0 +1,56 @@
+--- before_csv_dtype_restore.py
++++ after_csv_dtype_restore.py
+@@ -149,6 +149,27 @@
+ TIMING_PROFILES=('l2_depth4','l2_depth6')
+ TIMING_HORIZONS=(20,40,60)
+ FAILURE_COLUMNS=('inventory_mismatch_days','recovery_failure_days','pending_pairs','base_plan_mismatch_count','t1_violation_count')
++FLOAT32_CURRENT_FEATURES=frozenset('''f_timing_sigma20 f_session_fraction f_previous_week_amplitude
++f_timing_volume_rate f_previous_day_amplitude f_amount_vs_previous_day f_known_amplitude
++f_timing_market_day_return_std f_timing_reversal_confirmation f_market_return f_cumulative_amount_log
++f_cumulative_volume_log f_timing_market_return_5m f_market_day_return f_previous_week_return
++f_relative_day_return f_previous_week_amount f_previous_day_return f_range_position
++f_vwap_deviation_by_previous_amplitude f_realized_volatility f_cs_return_rank f_timing_trend_efficiency
++f_overnight_gap f_return_5m f_day_return_by_previous_amplitude f_timing_excess_return_5m
++f_current_volume_ratio f_open_return_by_previous_amplitude f_signal_price_log f_open_return
++f_vwap_deviation f_return_15m f_history_days f_day_return f_timing_market_return_15m
++f_timing_market_breadth f_timing_excess_return_15m f_timing_vwap_z'''.split())
++
++
++def restore_prediction_feature_dtypes(frame: pd.DataFrame) -> pd.DataFrame:
++    """还原冻结data/session/timing源码明确的39列float32，不改变阈值或float64周上下文。
++
++CSV文本不记录dtype；读取为float64后直接与训练分位界比较会产生虚假越界。
++这里仅还原原声明类型，不用容差扩张资格。原文件SHA仍按未经修改的CSV字节核对。
++"""
++    result=frame.copy()
++    for name in FLOAT32_CURRENT_FEATURES.intersection(result):result[name]=result[name].astype('float32')
++    return result
+ 
+ 
+ def independent_timing_rules() -> list[dict]:
+@@ -305,7 +326,7 @@
+                 assert all((model/name).stat().st_mtime_ns<=global_marker.stat().st_mtime_ns for name in hashes)
+                 supports[profile][horizon]=json.loads((model/'support.json').read_text())
+                 prediction_path=folder/f'validation_h{horizon}_{profile}_predictions.csv'
+-                predictions[profile][horizon]=read_audit_csv(prediction_path)
++                predictions[profile][horizon]=restore_prediction_feature_dtypes(read_audit_csv(prediction_path))
+                 saved_prediction_audit=json.loads((folder/f'validation_h{horizon}_{profile}_causality_audit.json').read_text())
+                 assert saved_prediction_audit['model_bundle_sha256']==hashes['model_bundle.joblib']
+                 assert saved_prediction_audit['prediction_rows']==len(predictions[profile][horizon])
+@@ -342,7 +363,7 @@
+         assert rule['inner_complete_pairs']==chosen.t_pair_count
+         outer=read_timing_decisions(folder/'t_decisions.csv')
+         if rule['enabled'] and reconstruct_decisions:
+-            profile=rule['profile'];outer_predictions={h:read_audit_csv(folder/f't_h{h}_{profile}_predictions.csv') for h in TIMING_HORIZONS}
++            profile=rule['profile'];outer_predictions={h:restore_prediction_feature_dtypes(read_audit_csv(folder/f't_h{h}_{profile}_predictions.csv')) for h in TIMING_HORIZONS}
+             for horizon,frame in outer_predictions.items():
+                 saved=json.loads((folder/f't_h{horizon}_{profile}_causality_audit.json').read_text())
+                 assert saved['model_bundle_sha256']==rule['model_bundle_sha256'][f'h{horizon}_{profile}']
+@@ -356,6 +377,7 @@
+         print(f'timing candidates passed {year}: 25 accounts; selected {chosen.candidate_index}',flush=True)
+     return {'passed':True,'candidate_accounts_independently_checked':count,'models_checked':6*len(results),'folds':results,
+             'daily_valuation_cache_sha256':input_record['sha256'],
++            'restored_source_declared_float32_feature_columns':sorted(FLOAT32_CURRENT_FEATURES),
+             'current_decisions_independently_rebuilt':reconstruct_decisions,
+             'scope':'Execution/accounting, positive-inner-net selector and frozen core model identities. Current gate reconstruction only when current_decisions_independently_rebuilt=true. Full training-sample independence is assessed by the separate model auditor.'}
+ 

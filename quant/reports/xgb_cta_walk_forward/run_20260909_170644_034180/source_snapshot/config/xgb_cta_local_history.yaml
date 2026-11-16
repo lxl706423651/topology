@@ -1,0 +1,53 @@
+# 仅用本地已缓存历史状态的股票进行正式规模训练，不访问外部服务，不称为完整市场研究。
+# 路径相对quant根目录；费用、模型及内层候选与预先确认的向前研究协议一致。
+data_root: ashare_minute_data_2023_2026_04/extracted
+output_dir: reports/xgb_cta_walk_forward
+cache_dir: reports/xgb_cta_cache
+reuse_factor_cache: reports/annual_method_validation/panel_cache/282322e813cbf3c6
+history_data_dir: reports/xgb_cta_cache/daily_history_2026-04-30
+history_coverage_policy: available_local
+start_date: '2023-01-01'
+end_date: '2026-04-30'
+test_years: [2023, 2024, 2025, 2026]
+workers: 12
+download_workers: 4
+network_timeout: 30
+max_symbols: 0
+universe_size: 300
+min_week_days: 3
+base_signal_minutes: 24
+entry_minutes_candidates: [24, 48, 120, 240]
+entry_styles: [trend, breakout, pullback]
+net_return_gates: [0.0, 0.003, 0.006]
+minimum_history_days: 60
+atr_days: 14
+max_features: 154
+feature_min_coverage: 0.80
+feature_max_correlation: 0.90
+labels_per_symbol_day: 2
+initial_cash: 1000000.0
+entry_top_n: 5
+entry_equity_fraction: 0.10
+max_symbol_exposure: 0.20
+max_total_exposure: 0.80
+commission_rate: 0.0008
+min_commission: 0.0
+transfer_rate: 0.00001
+stamp_rate_before_20230828: 0.001
+stamp_rate_from_20230828: 0.0005
+slippage_rate: 0.0005
+max_bar_amount_fraction: 0.05
+minimum_signal_amount: 200000.0
+validation_min_closed_lots: 5
+benchmark_symbol: sh.000300
+regime_lookback_days: 60
+regime_return_threshold: 0.05
+sharpe_target: 3.0
+fit_deployment_model: true
+random_seed: 42
+exit_profiles:
+  - {name: atr2_trail3_time5, initial_atr: 2.0, trailing_atr: 3.0, max_days: 5, trend_exit: true}
+  - {name: atr3_trail4_time10, initial_atr: 3.0, trailing_atr: 4.0, max_days: 10, trend_exit: true}
+model_profiles:
+  - {name: shallow, n_estimators: 180, max_depth: 3, min_child_weight: 60, reg_lambda: 12.0}
+  - {name: regularized, n_estimators: 220, max_depth: 5, min_child_weight: 100, reg_lambda: 20.0}

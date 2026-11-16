@@ -1,0 +1,23 @@
+# 新研究输入；其余执行合同继承已审计配置，不改旧配置和旧报告。
+base_config: config/xgb_cta_local_history.yaml
+source_cache: reports/xgb_cta_cache/976c434161dbad09923d
+expanded_cache: reports/xgb_cta_expanded_cache
+output_dir: reports/xgb_cta_expanded
+daily_lags: 20
+daily_windows: [5, 10, 20, 30, 60]
+max_features: 512
+feature_max_correlation: 0.95
+objectives: [return, probability, downside]
+entry_minutes_candidates: [24, 120]
+entry_styles: [trend, breakout, pullback]
+net_return_gates: [0.0, 0.003]
+probability_gates: [0.50, 0.55]
+sharpe_target: 2.0
+validation_min_closed_lots: 20
+workers: 12
+model_profiles:
+  - {name: shallow, n_estimators: 180, max_depth: 3, min_child_weight: 60, reg_lambda: 12.0}
+  - {name: regularized, n_estimators: 240, max_depth: 5, min_child_weight: 100, reg_lambda: 20.0}
+exit_profiles:
+  - {name: chandelier3_time10, initial_atr: 2.0, trailing_atr: 3.0, max_days: 10, trend_exit: false}
+  - {name: chandelier4_trend_time20, initial_atr: 3.0, trailing_atr: 4.0, max_days: 20, trend_exit: true}

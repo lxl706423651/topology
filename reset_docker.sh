@@ -16,22 +16,6 @@ err() {
     echo -e "${RED}[ERROR] $1${NC}"
 }
 
-# 检查 dcbuild 是否可用，如果只是别名，脚本中可能无法直接使用
-# 这里尝试启用别名扩展
-shopt -s expand_aliases
-# 尝试加载用户的 bashrc 以获取别名 (假设 dcbuild 定义在这里)
-if [ -f ~/.bashrc ]; then
-    source ~/.bashrc
-fi
-
-# 再次检查 dcbuild，如果还是没有，定义一个临时的函数
-if ! command -v dcbuild &> /dev/null; then
-    log "'dcbuild' 命令未找到，尝试将其定义为 'docker compose build'..."
-    dcbuild() {
-        docker compose build
-    }
-fi
-
 log "1. 停止 Docker 相关服务..."
 sudo systemctl stop docker.socket
 sudo systemctl stop docker
@@ -47,16 +31,10 @@ sudo rm -rf /var/run/containerd
 log "3. 重新创建配置目录并写入 daemon.json..."
 sudo mkdir -p /etc/docker
 
-# 使用 tee 命令将配置写入文件 (非交互式)
-sudo tee /etc/docker/daemon.json > /dev/null <<EOF
-{
-  "registry-mirrors": [
-    "https://docker.1ms.run",
-    "https://docker.anyhub.us.kg",
-    "https://dockerhub.icu",
-    "https://docker.1panel.live"
-  ]
-}
+# 不配置第三方 registry mirror，直接使用官方 Docker Hub。
+# 第三方代理缓存若与 Docker Hub 元数据不同步，会触发 failed size validation。
+sudo tee /etc/docker/daemon.json > /dev/null <<'EOF'
+{}
 EOF
 
 log "4. 重载配置并重启 Docker..."
@@ -74,16 +52,17 @@ if ! sudo docker info > /dev/null 2>&1; then
     exit 1
 fi
 
-# log "5. 开始构建 Seed Emulator 镜像..."
+log "5. 通过官方 Docker Hub 拉取基础镜像..."
+docker pull docker.io/library/ubuntu:24.04
 
 # 构建 Base
 log "Building: seedemu-base"
 cd "${HOME}/seed-emulator/docker_images/seedemu-base"
-dcbuild
+docker compose build
 
 # 构建 Router
 log "Building: seedemu-router"
 cd "${HOME}/seed-emulator/docker_images/seedemu-router"
-dcbuild
+docker compose build
 
 log "所有任务完成！"

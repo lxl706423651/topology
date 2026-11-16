@@ -1,0 +1,41 @@
+name: quant
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - beautifulsoup4
+  - bottleneck
+  - duckdb
+  - fastparquet
+  - ipykernel
+  - joblib
+  - lxml
+  - matplotlib
+  - numba
+  - numpy
+  - openpyxl
+  - pandas
+  - pip
+  - polars
+  - pyarrow
+  - python=3.10
+  - pyyaml
+  - requests
+  - scikit-learn
+  - scipy
+  - seaborn
+  - statsmodels
+  - ta-lib
+  - tqdm
+  - xlrd
+  - pip:
+      - akshare
+      - alphalens-reloaded
+      - catboost
+      - empyrical
+      - factor-analyzer
+      - jupyterlab
+      - lightgbm
+      - optuna
+      - shap
+      - xgboost
