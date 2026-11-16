@@ -1,0 +1,22 @@
+# Paths are resolved relative to this file. CLI options may select another scale/output.
+topology:
+  scale: 3083
+  input: topology/input
+  output: output
+  platform: amd
+docker:
+  project: large_scale
+  parallel_jobs: 8
+  batch_size: 50
+  ready_timeout: 900
+bird:
+  start_delay: 0.02
+  post_start_delay: 60
+kernel:
+  load_threshold: 110
+  recovery_threshold: 50
+  update_interval: 0.5
+verification:
+  load_threshold: 50
+  check_interval: 30
+  command_timeout: 60

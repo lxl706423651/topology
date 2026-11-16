@@ -1,0 +1,11 @@
+# Input data is part of this reproducible example.
+!/topology/input/assignment.pkl
+!/topology/input/real_topology_*.txt
+!/SHA256SUMS
+/output/
+/output_*/
+/evaluationResult/
+/logs/
+__pycache__/
+.pytest_cache/
+.fastDockerBuild/
